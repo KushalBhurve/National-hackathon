@@ -72,3 +72,21 @@ class ChatRequest(BaseModel):
     query: str
     selected_sources: List[str] = []
     selected_machine: Optional[str] = None # Added machine filter
+
+class TechnicianInput(BaseModel):
+    name: str
+    role: str # e.g., "Senior Engineer", "Maintenance Tech"
+    certification_level: Literal["L1", "L2", "L3"]
+    status: Literal["Active", "On Leave", "Busy"] = "Active"
+
+class TaskInput(BaseModel):
+    title: str
+    description: str
+    target_machine: str # This should match a machine name in your graph
+    required_certification: Literal["L1", "L2", "L3"]
+    priority: Literal["Low", "Medium", "High", "Critical"]
+
+class MachineInput(BaseModel):
+    name: str # e.g., "Robotic Arm #4"
+    location: str # e.g., "Line A - Station 12"
+    type: str # e.g., "Welder"

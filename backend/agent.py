@@ -96,122 +96,136 @@ class GraphState(TypedDict):
 
 # --- 4. TRIPLE INGESTION NODE (Entities + Neo4j Chunks + Chroma Chunks) ---
 # --- 4. TRIPLE INGESTION NODE (Entities + Neo4j Chunks + Chroma Chunks) ---
+
+def add_machine_to_graph(machine_data: dict):
+    """
+    Explicitly creates a Machinery node.
+    """
+    query = """
+    MERGE (m:Machinery {name: $name})
+    SET m.id = $id,
+        m.location = $location,
+        m.type = $type,
+        m.status = 'Online',
+        m.source = 'Dashboard_Entry'
+    RETURN m
+    """
+    
+    # Create an ID like 'mach_robotic_arm'
+    safe_name = machine_data['name'].lower().replace(" ", "_")
+    machine_id = f"mach_{safe_name}"
+    
+    params = {
+        "id": machine_id,
+        "name": machine_data['name'],
+        "location": machine_data['location'],
+        "type": machine_data['type']
+    }
+    
+    try:
+        graph.query(query, params)
+        print(f" > Added Machinery: {machine_data['name']}")
+        return True
+    except Exception as e:
+        print(f"Error adding machinery: {e}")
+        return False
+
+    
+
 def ingest_node(state: GraphState):
     print("\n--- AGENT: STARTING COMPLETE INGESTION ---")
-    
     docs_to_process = []
     
-    # ---------------------------------------------------------
-    # STEP 1: PARSE METADATA
-    # ---------------------------------------------------------
+    # 1. PARSE & PREPARE
     for content in state['documents']:
         try:
-            # Defaults
             machinery = "Unknown"
             manual_type = "General"
             text_part = content
 
-            # Extract Metadata
             if "Content: " in content:
                 meta_part, text_part = content.split("Content: ", 1)
-                
-                # Parsing logic
                 if "Machinery: " in meta_part:
                     machinery = meta_part.split("Machinery: ")[1].split(".")[0].strip()
                 if "Document Type: " in meta_part:
                     manual_type = meta_part.split("Document Type: ")[1].split(".")[0].strip()
 
-            # --- FIX 1: Warning if text is empty after parsing ---
-            if not text_part or not text_part.strip():
-                print(f"   > SKIPPING: Metadata found, but content text is empty.")
-                continue
+            if not text_part.strip(): continue
 
-            # Generate Unique ID
             content_hash = hashlib.md5(text_part.encode('utf-8')).hexdigest()[:8]
             doc_id = f"{machinery}_{manual_type}_{content_hash}"
-
-            # Create Metadata Dict (Applied to ALL storage)
+            
+            # Metadata for Neo4j Properties
             doc_metadata = {
                 "doc_id": doc_id,
                 "machinery": machinery, 
                 "manual_type": manual_type, 
                 "source": "user_upload"
             }
-
+            
             doc = Document(page_content=text_part, metadata=doc_metadata)
             docs_to_process.append(doc)
-            print(f"   > Prepared Doc: {doc_id}")
             
         except Exception as e:
-            print(f"   > Metadata Parsing Failed: {e}")
+            print(f"Metadata Parse Error: {e}")
 
-    # If parsing failed for all docs, exit early
-    if not docs_to_process:
-        print("   > No valid documents to process.")
-        return {"error_log": "no_valid_docs"}
+    if not docs_to_process: return {"error_log": "no_valid_docs"}
 
-    # ---------------------------------------------------------
-    # STEP 2: KNOWLEDGE GRAPH (ENTITIES)
-    # ---------------------------------------------------------
-    print("   > [1/3] Extracting Entities (Nodes & Relationships)...")
+    # 2. EXTRACT ENTITIES (LLM)
+    print("   > Extracting Entities...")
     try:
         transformer = LLMGraphTransformer(llm=llm)
         graph_documents = transformer.convert_to_graph_documents(docs_to_process)
-
-        # Inject metadata into every Entity Node
+        # Inject metadata into extracted entities so we know where they came from
         for graph_doc in graph_documents:
             source_meta = graph_doc.source.metadata
             for node in graph_doc.nodes:
                 node.properties.update(source_meta)
-
         graph.add_graph_documents(graph_documents)
-        print(f"   > Saved Entities to Neo4j.")
     except Exception as e:
-        print(f"   > KG Extraction Warning: {e}")
+        print(f"   > KG Error: {e}")
 
-    # ---------------------------------------------------------
-    # STEP 3: PREPARE CHUNKS
-    # ---------------------------------------------------------
+    # 3. VECTOR INDEXING (Neo4j & Chroma)
+    print("   > Indexing Vectors...")
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunked_docs = text_splitter.split_documents(docs_to_process)
-    print(f"   > Created {len(chunked_docs)} chunks.")
-
-    # --- FIX 2: GUARD CLAUSE (Prevents ChromaDB Crash) ---
-    if not chunked_docs:
-        print("   > WARNING: No text chunks created. Skipping Vector Indexing to prevent crash.")
-        return {"error_log": "no_chunks_created"}
-
-    # ---------------------------------------------------------
-    # STEP 4: NEO4J VECTOR INDEX (CREATES 'DocumentChunk' NODES)
-    # ---------------------------------------------------------
-    print("   > [2/3] Indexing Chunks in Neo4j...")
     
-    try:
-        Neo4jVector.from_documents(
-            chunked_docs,
-            embeddings,
-            url=NEO4J_URI,
-            username=NEO4J_USERNAME,
-            password=NEO4J_PASSWORD,
-            index_name="factory_vector_index", 
-            node_label="DocumentChunk",        
-            embedding_node_property="embedding",
-            enhanced_schema=True
-        )
-        print("   > 'DocumentChunk' nodes created in Neo4j.")
-    except Exception as e:
-        print(f"   > Neo4j Vector Error: {e}")
+    if chunked_docs:
+        # Neo4j Vector
+        try:
+            Neo4jVector.from_documents(
+                chunked_docs, embeddings, url=NEO4J_URI, username=NEO4J_USERNAME, password=NEO4J_PASSWORD,
+                index_name="factory_vector_index", node_label="DocumentChunk", embedding_node_property="embedding"
+            )
+        except Exception as e: print(f"Neo4j Vector Error: {e}")
+        
+        # Chroma Vector
+        try:
+            vector_store_chroma.add_documents(chunked_docs)
+        except Exception as e: print(f"Chroma Vector Error: {e}")
 
-    # ---------------------------------------------------------
-    # STEP 5: CHROMADB VECTOR INGESTION
-    # ---------------------------------------------------------
-    print("   > [3/3] Indexing Chunks in ChromaDB...")
-    try:
-        vector_store_chroma.add_documents(chunked_docs)
-        print("   > Saved to local ChromaDB.")
-    except Exception as e:
-        print(f"   > ChromaDB Error: {e}")
-        return {"error_log": str(e)}
+    # 4. CRITICAL: LINK DOCUMENT TO MACHINERY NODE
+    print("   > Linking Documents to Machinery...")
+    for doc in docs_to_process:
+        target_machine = doc.metadata.get("machinery")
+        doc_id = doc.metadata.get("doc_id")
+        
+        if target_machine and target_machine != "Unknown":
+            # This query connects the Document (source of info) to the Physical Machine
+            link_query = """
+            MATCH (d:DocumentChunk) 
+            WHERE d.doc_id = $doc_id
+            
+            MERGE (m:Machinery {name: $machine_name})
+            ON CREATE SET m.status = 'Online', m.source = 'Ingestion_Inferred'
+            
+            MERGE (d)-[:MANUAL_FOR]->(m)
+            """
+            try:
+                graph.query(link_query, {"doc_id": doc_id, "machine_name": target_machine})
+                print(f"     -> Linked Chunks for '{doc_id}' to Machine '{target_machine}'")
+            except Exception as e:
+                print(f"     -> Linking Error: {e}")
 
     return {"error_log": None}
     
@@ -511,3 +525,85 @@ def process_chat_query(request):
         "answer": response_text,
         "trace": trace_steps
     }
+
+def add_technician_to_graph(tech: dict):
+    """
+    Directly creates a Technician node in Neo4j.
+    """
+    query = """
+    MERGE (t:Person:Technician {name: $name})
+    SET t.id = $id,
+        t.role = $role,
+        t.certification_level = $level,
+        t.status = $status,
+        t.source = 'User_Entry'
+    RETURN t
+    """
+    
+    # Generate a simple ID if not present (or use name as key)
+    tech_id = f"tech_{hashlib.md5(tech['name'].encode()).hexdigest()[:6]}"
+    
+    params = {
+        "id": tech_id,
+        "name": tech["name"],
+        "role": tech["role"],
+        "level": tech["certification_level"],
+        "status": tech["status"]
+    }
+    
+    try:
+        graph.query(query, params)
+        print(f" > Added Technician: {tech['name']}")
+        return True
+    except Exception as e:
+        print(f"Error adding technician: {e}")
+        return False
+
+def add_task_to_graph(task: dict):
+    """
+    Creates a Task node and GUARANTEES a link to the specific Machine node.
+    """
+    # Cypher Logic:
+    # 1. MERGE (create if not exists) the Task.
+    # 2. MERGE (create if not exists) the Machine based on the dropdown selection.
+    # 3. MERGE (create if not exists) the relationship between them.
+    query = """
+    MERGE (t:Task {title: $title})
+    SET t.id = $id,
+        t.description = $desc,
+        t.required_certification = $req_cert,
+        t.priority = $priority,
+        t.status = 'Pending',
+        t.source = 'User_Entry'
+    
+    WITH t
+    
+    // GUARANTEE: Ensure the Machine node exists using the exact name from the dropdown
+    MERGE (m:Machinery {id: $target_machine})
+    ON CREATE SET m.name = $target_machine
+    
+    // Create the relationship
+    MERGE (t)-[:APPLIES_TO]->(m)
+    
+    RETURN t, m
+    """
+    
+    # Generate a unique task ID
+    task_id = f"task_{hashlib.md5(task['title'].encode()).hexdigest()[:6]}"
+    
+    params = {
+        "id": task_id,
+        "title": task["title"],
+        "desc": task["description"],
+        "req_cert": task["required_certification"],
+        "priority": task["priority"],
+        "target_machine": task["target_machine"] # Exact string from frontend dropdown
+    }
+    
+    try:
+        graph.query(query, params)
+        print(f" > SUCCESS: Task '{task['title']}' linked to Machine '{task['target_machine']}'")
+        return True
+    except Exception as e:
+        print(f"Error adding task: {e}")
+        return False

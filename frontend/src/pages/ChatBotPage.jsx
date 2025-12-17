@@ -179,11 +179,28 @@ const ChatbotPage = () => {
                 )}
               </div>
             </div>
+            
+            {/* --- UPDATED NAVIGATION --- */}
             <div className="flex flex-col gap-2">
+              {/* Dashboard */}
               <button onClick={() => navigate('/dashboard')} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#1c252e] transition-colors group ${isCollapsed ? 'justify-center' : 'w-full text-left'}`}>
                 <span className="material-symbols-outlined text-[20px]">dns</span>
                 {!isCollapsed && <p className="text-sm font-medium whitespace-nowrap">Data Sources</p>}
               </button>
+
+              {/* Resources (NEW) */}
+              <button onClick={() => navigate('/resources')} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#1c252e] transition-colors group ${isCollapsed ? 'justify-center' : 'w-full text-left'}`}>
+                <span className="material-symbols-outlined text-[20px]">group_add</span>
+                {!isCollapsed && <p className="text-sm font-medium whitespace-nowrap">Resources</p>}
+              </button>
+
+              {/* Compliance (NEW LINK) */}
+              <button onClick={() => navigate('/compliance')} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#1c252e] transition-colors group ${isCollapsed ? 'justify-center' : 'w-full text-left'}`}>
+                <span className="material-symbols-outlined text-[20px]">fact_check</span>
+                {!isCollapsed && <p className="text-sm font-medium whitespace-nowrap">Compliance</p>}
+              </button>
+
+              {/* Agents (Active Page) */}
               <button className={`flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[#137fec] text-white shadow-lg shadow-[#137fec]/20 transition-all ${isCollapsed ? 'justify-center' : 'w-full text-left'}`}>
                 <span className="material-symbols-outlined text-[20px]">smart_toy</span>
                 {!isCollapsed && <p className="text-sm font-medium whitespace-nowrap">Agents</p>}

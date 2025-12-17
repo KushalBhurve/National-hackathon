@@ -6,14 +6,14 @@ from dotenv import load_dotenv
 load_dotenv()
 from models import (
     DataSource, DashboardStats, ComplianceAlert, Topology, 
-    ChatRequest, ChatResponse, ChatRequest, ChatResponse, FilterOptions
+    ChatRequest, ChatResponse, ChatRequest, ChatResponse, FilterOptions, TechnicianInput, TaskInput, MachineInput, 
 )
 from data import DATA_SOURCES, STATS, COMPLIANCE_ALERTS
 # REMOVED: TOPOLOGY import from data.py
 from liquid_graph import graph_store
 
 import fitz  # PyMuPDF
-from agent import graph_workflow, process_chat_query, get_knowledge_graph_filters
+from agent import graph_workflow, process_chat_query, get_knowledge_graph_filters, add_technician_to_graph, add_task_to_graph, add_machine_to_graph
 
 app = FastAPI(title="FactoryOS Backend")
 
@@ -100,6 +100,27 @@ async def chat_agent(request: ChatRequest):
 async def get_agent_filters():
     """Fetch distinct machines and sources from the Knowledge Graph"""
     return get_knowledge_graph_filters()
+
+@app.post("/api/resources/technician")
+async def create_technician(tech: TechnicianInput):
+    success = add_technician_to_graph(tech.dict())
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to add technician to graph")
+    return {"status": "success", "message": f"Technician {tech.name} added."}
+
+@app.post("/api/resources/task")
+async def create_task(task: TaskInput):
+    success = add_task_to_graph(task.dict())
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to add task to graph")
+    return {"status": "success", "message": f"Task '{task.title}' created and linked."}
+
+@app.post("/api/resources/machine")
+async def create_machine(machine: MachineInput):
+    success = add_machine_to_graph(machine.dict())
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to add machine to graph")
+    return {"status": "success", "message": f"Machine '{machine.name}' added to Knowledge Graph."}
 
 if __name__ == "__main__":
     import uvicorn

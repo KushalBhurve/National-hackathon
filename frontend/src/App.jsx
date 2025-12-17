@@ -5,6 +5,8 @@ import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/Dashboard';
 import CompliancePage from './pages/CompliancePage';
 import ChatbotPage from './pages/ChatBotPage';
+// --- NEW IMPORT ---
+import ResourceManagementPage from './pages/ResourceManagementPage';
 
 function App() {
   return (
@@ -19,15 +21,17 @@ function App() {
         {/* 3. Dashboard Route (Protected Area) */}
         <Route path="/dashboard" element={<DashboardPage />} />
         
+        {/* 4. Compliance Route */}
         <Route path="/compliance" element={<CompliancePage />} />
 
+        {/* 5. Agent/Chatbot Route */}
         <Route path="/agent" element={<ChatbotPage />} />
+
+        {/* 6. NEW: Resource Management Route */}
+        <Route path="/resources" element={<ResourceManagementPage />} />
 
         {/* Catch-all: Redirect unknown URLs back to Home */}
         <Route path="*" element={<Navigate to="/" replace />} />
-
-
-
 
       </Routes>
     </Router>
