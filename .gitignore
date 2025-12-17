@@ -1,0 +1,4 @@
+/backend/.venv
+/backend/env
+/backend/__pycache__
+/backend/chroma_db_store

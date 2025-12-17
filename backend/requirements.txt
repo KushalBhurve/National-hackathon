@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+pydantic
+langchain_core
+langchain_openai
+langchain_experimental
+langchain_neo4j
+langgraph
+networkx
+pymupdf
+python-dotenv
+langchain_chroma
+langchain
