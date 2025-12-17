@@ -328,190 +328,146 @@ def get_dynamic_schema_context(graph, selected_machine=None):
         print(f"Error in schema context: {e}")
         return context_data
 
+def get_machine_neighborhood_context(machine_name, allowed_sources=None):
+    """
+    Deterministic Graph Retrieval with SOURCE FILTERING:
+    Fetches the central Machine node and connected nodes, BUT filters
+    them based on the user's selected Data Sources (manual_type).
+    """
+    if not machine_name or machine_name == "All":
+        return "No specific machine selected. Graph context unavailable."
+
+    # If no sources provided, default to an empty list to prevent errors
+    if allowed_sources is None:
+        allowed_sources = []
+
+    # --- UPDATED QUERY WITH FILTER ---
+    # 1. Matches the machine and neighbors.
+    # 2. WHERE clause: 
+    #    - If the node has a 'manual_type' property (ingested data), it MUST be in 'allowed_sources'.
+    #    - OR if 'manual_type' is NULL (e.g., Tasks/Technicians created via UI), we include them.
+    query = """
+    MATCH (m:Machinery {name: $name})-[r]-(n)
+    WHERE (n.manual_type IN $sources OR n.manual_type IS NULL)
+    RETURN 
+        type(r) as relationship,
+        labels(n) as node_labels,
+        coalesce(n.text, n.description, n.title, "No text content") as content,
+        coalesce(n.doc_id, n.id, "No ID") as node_id,
+        n
+    LIMIT 50
+    """
+    
+    try:
+        # Pass the allowed_sources list to Neo4j
+        results = graph.query(query, {"name": machine_name, "sources": allowed_sources})
+        
+        if not results:
+            return f"No graph connections found for machine: '{machine_name}' using sources: {allowed_sources}"
+
+        # Format the results into a clear narrative for the LLM
+        context_lines = [f"--- GRAPH CONNECTIONS FOR: {machine_name} (Filtered by Sources) ---"]
+        
+        for record in results:
+            rel_type = record['relationship']
+            node_type = record['node_labels'][0] if record['node_labels'] else "Node"
+            content = record['content']
+            
+            # Smart Formatting based on Node Type
+            if "DocumentChunk" in record['node_labels']:
+                # Mention the source manual in the context so LLM knows where it came from
+                source_manual = record['n'].get('manual_type', 'Unknown Source')
+                context_lines.append(f"• [MANUAL: {source_manual}] (Linked via {rel_type}): {content[:300]}...")
+            elif "Task" in record['node_labels']:
+                task_status = record['n'].get('status', 'Unknown')
+                context_lines.append(f"• [MAINTENANCE TASK] (Linked via {rel_type}): {content} (Status: {task_status})")
+            else:
+                context_lines.append(f"• [RELATED ENTITY] {node_type} ({rel_type}): {content}")
+                
+        return "\n".join(context_lines)
+
+    except Exception as e:
+        return f"Graph Retrieval Error: {str(e)}"
+    
 
 def process_chat_query(request):
     """
-    Hybrid Retrieval with Dynamic Context Injection:
-    1. Vector Search (Chroma) for unstructured text.
-    2. Graph Search (Neo4j) with LIVE schema & ID awareness.
-    3. Synthesize both.
+    Revised Hybrid Retrieval:
+    1. Vector Search: Finds generic text in Chroma (Filtered by Source).
+    2. Graph Search: Finds structured connections (Filtered by Source).
+    3. Synthesis: Combines both.
     """
     query = request.query
-    sources = request.selected_sources
+    sources = request.selected_sources # This is the list from frontend (e.g. ['Maintenance Manual'])
     machine = request.selected_machine
 
-    print(f"\n--- PROCESSING HYBRID CHAT ---")
+    print(f"\n--- PROCESSING HYBRID CHAT (STAR SCHEMA MODE) ---")
     print(f"Query: {query}")
-    print(f"Context: Machine='{machine}' | Sources={sources}")
+    print(f"Target Machine: '{machine}'")
+    print(f"Active Sources: {sources}")
 
-    # --- SAFETY CHECK ---
-    if not sources:
-        return {
-            "answer": "Please select at least one data source to proceed.",
-            "trace": ["Blocked: No data sources selected."]
-        }
-
-    # ============================================================
-    # PART 1: VECTOR RETRIEVAL (Unstructured Text from Chroma)
-    # ============================================================
-    
-    # 1. Build Dynamic Vector Filters
+    # --- 1. VECTOR RETRIEVAL (Unstructured Text) ---
+    print(" > Step 1: Querying Vector Store...")
     conditions = []
     
-    # Source Logic
+    # Existing Vector Filter Logic
     if len(sources) == 1:
         conditions.append({"manual_type": sources[0]})
-    else:
+    elif len(sources) > 1:
         or_block = [{"manual_type": src} for src in sources]
         conditions.append({"$or": or_block})
-
-    # Machine Logic
+    
     if machine and machine != "All":
         conditions.append({"machinery": machine})
 
     final_filter = {}
-    if len(conditions) == 1:
-        final_filter = conditions[0]
-    elif len(conditions) > 1:
-        final_filter = {"$and": conditions}
+    if len(conditions) == 1: final_filter = conditions[0]
+    elif len(conditions) > 1: final_filter = {"$and": conditions}
 
-    # 2. Retrieve Vector Docs
-    search_kwargs = {"k": 4}
-    if final_filter:
-        search_kwargs["filter"] = final_filter
+    search_kwargs = {"k": 5} 
+    if final_filter: search_kwargs["filter"] = final_filter
 
-    retriever = vector_store_chroma.as_retriever(search_kwargs=search_kwargs)
-    vector_docs = retriever.invoke(query)
+    vector_docs = vector_store_chroma.as_retriever(search_kwargs=search_kwargs).invoke(query)
+    vector_context_str = "\n\n".join([f"Source: {d.metadata.get('doc_id')}\nContent: {d.page_content}" for d in vector_docs])
+
+    # --- 2. GRAPH RETRIEVAL (Structured Neighborhood) ---
+    print(" > Step 2: Fetching Graph Neighborhood...")
     
-    # Format vector docs into a string
-    vector_context_str = "\n\n".join([d.page_content for d in vector_docs]) if vector_docs else "No relevant text documents found."
-
-    # ============================================================
-    # PART 2: GRAPH RETRIEVAL (Structured Relationships from Neo4j)
-    # ============================================================
+    # *** UPDATE: PASS SOURCES HERE ***
+    graph_context_str = get_machine_neighborhood_context(machine, allowed_sources=sources)
     
-    graph_context_str = "No graph data found."
-    graph_trace = "Graph Query Skipped or Failed"
+    print(f"   Graph Context Length: {len(graph_context_str)} chars")
 
-    try:
-        # 1. CRITICAL: REFRESH SCHEMA STRUCTURE
-        graph.refresh_schema()
-        
-        # 2. CRITICAL: FETCH DYNAMIC VALUES (Schema + Actual IDs)
-        # We pass the 'machine' so we get IDs specific to 'abcd', 'vevor', etc.
-        dynamic_context = get_dynamic_schema_context(graph, selected_machine=machine)
-        
-        print(f"   > Injected IDs (Snippet): {dynamic_context['relevant_ids'][:100]}...")
-        
-        # 3. DEFINE A ROBUST PROMPT WITH ID INJECTION
-        cypher_generation_template = """
-        Task: Generate Cypher statement to query a graph database.
-        
-        Schema:
-        {schema}
-        
-        CRITICAL DATA CONTEXT:
-        1. Valid Machinery Names: [{valid_machines}]
-        2. Valid Node Labels: [{valid_labels}]
-        
-        3. *** ACTUAL NODE IDs FOUND IN DB FOR THIS MACHINE ***:
-           [{relevant_ids}]
-        
-        Instructions:
-        1. **EXACT MATCHING PRIORITY:** - Check the "ACTUAL NODE IDs" list above.
-           - If the user asks for "bench lathe" and you see "Bench_Lathe" in the list, USE "Bench_Lathe" exactly.
-           - Example: `WHERE n.id = 'Bench_Lathe'` (Preferred over CONTAINS)
-        
-        2. **FUZZY FALLBACK:**
-           - If the specific ID is not in the list, use: `toLower(n.id) CONTAINS toLower('value')`.
-        
-        3. **LABEL FLEXIBILITY:** - If searching for a manufacturer/company, use `(n:Organization|Company)`.
-           - If searching for a machine/product, use `(n:Machine|Product)`.
-        
-        4. **FILTERING:**
-           - Always filter by the `machinery` property if provided.
-        
-        The question is:
-        {query}
-        """
-        
-        cypher_prompt = PromptTemplate(
-            input_variables=["schema", "query", "valid_machines", "valid_labels", "relevant_ids"],
-            template=cypher_generation_template
-        )
-
-        # 4. Initialize Chain with Custom Prompt
-        cypher_chain = GraphCypherQAChain.from_llm(
-            llm=llm,
-            graph=graph,
-            cypher_prompt=cypher_prompt, 
-            verbose=True,
-            allow_dangerous_requests=True,
-            return_direct=True 
-        )
-        
-        # 5. Run the Chain
-        structured_query = query
-        if machine and machine != "All":
-            # We guide the LLM to filter by the property
-            structured_query = f"{query} (Filter for the entity where property 'machinery' is '{machine}')"
-
-        print(f"   > Generating Cypher for: {structured_query}")
-        
-        # Pass the dynamic values into the chain
-        graph_result = cypher_chain.invoke({
-            "query": structured_query,
-            "valid_machines": dynamic_context['valid_machines'],
-            "valid_labels": dynamic_context['valid_labels'],
-            "relevant_ids": dynamic_context['relevant_ids'] # <--- INJECT IDs HERE
-        })
-        
-        # --- DEBUG: PRINT RETRIEVED NODE ---
-        print(f"   > RAW GRAPH RESULT: {graph_result}")
-        # -----------------------------------
-        
-        if graph_result.get('result'):
-            graph_context_str = str(graph_result['result'])
-            graph_trace = "Graph Search Successful"
-        else:
-            graph_trace = "Graph Search: No matching entities found"
-
-    except Exception as e:
-        print(f"Graph Error: {e}")
-        graph_trace = f"Graph Error: {str(e)}"
-
-    # ============================================================
-    # PART 3: HYBRID MERGE & GENERATION
-    # ============================================================
-
-    # Fallback if both fail
-    if not vector_docs and "No matching entities" in graph_trace:
-         return {
-            "answer": f"I couldn't find data for '{query}' regarding {machine} in vectors or the knowledge graph.",
-            "trace": [f"Vector Filter: {final_filter}", graph_trace]
-        }
-
-    # Create the Hybrid Prompt
+    # --- 3. HYBRID SYNTHESIS ---
+    print(" > Step 3: Synthesizing Answer...")
+    
     prompt = ChatPromptTemplate.from_template(
-        """You are a FactoryOS industrial assistant. You have access to two types of knowledge:
+        """You are an industrial expert assistant for FactoryOS.
         
-        1. STRUCTURED KNOWLEDGE (Exact database relationships):
+        You have two information sources to answer the user's question.
+        BOTH sources have been filtered to only include data from: {allowed_sources_str}
+        
+        SOURCE 1: KNOWLEDGE GRAPH (The specific machine's direct connections)
         {graph_context}
         
-        2. UNSTRUCTURED MANUALS (Text excerpts):
+        SOURCE 2: VECTOR SEARCH (Relevant text excerpts from manuals)
         {vector_context}
         
-        USER QUERY: 
-        {query}
+        USER QUESTION: {query}
         
-        Synthesize an answer using both sources. If the structured knowledge contradicts the text, prioritize the structured knowledge.
-        """
+        INSTRUCTIONS:
+        1. Prioritize SOURCE 1 for facts about relationships.
+        2. Use SOURCE 2 for detailed procedures.
+        3. If you cannot find the answer in these specific sources, state that the active data filters may be excluding the answer.
+        
+        Answer professionally and concisely:"""
     )
 
     chain = (
         {
             "graph_context": lambda x: graph_context_str,
             "vector_context": lambda x: vector_context_str,
+            "allowed_sources_str": lambda x: ", ".join(sources),
             "query": lambda x: query
         }
         | prompt 
@@ -522,19 +478,20 @@ def process_chat_query(request):
     try:
         response_text = chain.invoke(query)
         trace_steps = [
-            f"Vector Filter: {str(final_filter)}",
-            f"Vector Results: {len(vector_docs)} chunks",
-            f"Graph Status: {graph_trace}",
-            "Hybrid Response Generated"
+            f"Active Filters: {sources}",
+            f"Vector Results: {len(vector_docs)} chunks found",
+            f"Graph Context: Fetched neighborhood for '{machine}'",
+            "Hybrid Answer Generated"
         ]
     except Exception as e:
-        response_text = "Error generating response."
+        response_text = "I encountered an error generating the response."
         trace_steps = [f"Error: {str(e)}"]
 
     return {
         "answer": response_text,
         "trace": trace_steps
     }
+
 
 def add_technician_to_graph(tech: dict):
     """
@@ -568,15 +525,11 @@ def add_technician_to_graph(tech: dict):
     except Exception as e:
         print(f"Error adding technician: {e}")
         return False
-
+    
 def add_task_to_graph(task: dict):
     """
     Creates a Task node and GUARANTEES a link to the specific Machine node.
     """
-    # Cypher Logic:
-    # 1. MERGE (create if not exists) the Task.
-    # 2. MERGE (create if not exists) the Machine based on the dropdown selection.
-    # 3. MERGE (create if not exists) the relationship between them.
     query = """
     MERGE (t:Task {title: $title})
     SET t.id = $id,
@@ -589,8 +542,7 @@ def add_task_to_graph(task: dict):
     WITH t
     
     // GUARANTEE: Ensure the Machine node exists using the exact name from the dropdown
-    MERGE (m:Machinery {id: $target_machine})
-    ON CREATE SET m.name = $target_machine
+    MERGE (m:Machinery {name: $target_machine})
     
     // Create the relationship
     MERGE (t)-[:APPLIES_TO]->(m)

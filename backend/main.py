@@ -164,9 +164,30 @@ async def resolve_alert(alert_id: str):
     raise HTTPException(status_code=404, detail="Alert not found")
 
 @app.post("/api/ingest")
-async def ingest_data(file: UploadFile = File(...), machinery: str = Form(...), manual_type: str = Form(...)):
-    # Mock ingest logic
-    return {"status": "Success", "machinery_added": machinery}
+async def ingest_data(
+    file: UploadFile = File(...), 
+    machinery: str = Form(...), 
+    manual_type: str = Form(...)
+):
+    # 1. Extract Text from PDF
+    pdf_bytes = await file.read()
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    text = "".join([page.get_text() for page in doc])
+
+    # 2. Enrich text with metadata so the Agent knows the context
+    enriched_content = f"Document Type: {manual_type}. Machinery: {machinery}. Content: {text}"
+
+    # 3. Run the Self-Healing LangGraph Workflow
+    result = graph_workflow.invoke({
+        "documents": [enriched_content],
+        "error_log": None
+    })
+
+    return {
+        "status": "Success",
+        "workflow_path": "Refactored" if result["error_log"] == "refactored" else "Standard Ingest",
+        "machinery_added": machinery
+    }
 
 @app.post("/api/agent/chat", response_model=ChatResponse)
 async def chat_agent(request: ChatRequest):
