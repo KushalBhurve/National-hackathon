@@ -251,25 +251,36 @@ graph_workflow = workflow_builder.compile()
 # --- 7. HELPER: GET FILTERS ---
 def get_knowledge_graph_filters():
     """
-    Queries Neo4j to find all unique Machinery names and Manual Types/Sources
-    currently indexed in the graph.
+    Queries Neo4j to find all unique Machinery names from the 
+    OFFICIAL 'Machinery' nodes (created via Dashboard or Ingestion).
     """
     try:
-        # distinct machinery
-        query_machine = "MATCH (n:DocumentChunk) RETURN DISTINCT n.machinery AS m"
-        machines = [r["m"] for r in graph.query(query_machine) if r["m"] != "Unknown"]
+        # --- MATCHES YOUR NODE STRUCTURE ---
+        # 1. Matches label (:Machinery)
+        # 2. Returns property (.name)
+        query_machine = """
+        MATCH (m:Machinery) 
+        WHERE m.name IS NOT NULL
+        RETURN DISTINCT m.name AS name
+        ORDER BY name ASC
+        """
         
-        # distinct sources/manual_types
+        machine_result = graph.query(query_machine)
+        machines = [r["name"] for r in machine_result]
+        
+        # --- Keep Source Query (looks at Documents) ---
         query_source = "MATCH (n:DocumentChunk) RETURN DISTINCT n.manual_type AS s"
-        sources = [r["s"] for r in graph.query(query_source) if r["s"] != "General"]
+        source_result = graph.query(query_source)
+        sources = [r["s"] for r in source_result if r["s"] and r["s"] != "General"]
         
         return {
-            "machinery": sorted(list(set(machines))),
+            "machinery": machines,
             "sources": sorted(list(set(sources)))
         }
     except Exception as e:
         print(f"Error fetching filters: {e}")
         return {"machinery": [], "sources": []}
+
 
 # --- 8. HYBRID RETRIEVAL (VECTOR + GRAPH) ---
 
