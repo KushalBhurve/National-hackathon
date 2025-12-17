@@ -1,0 +1,7 @@
+uvicorn main:app --reload
+
+npm config set strict-ssl false
+npm cache clean --force
+Remove-Item -Recurse -Force node_modules
+Remove-Item package-lock.json
+npm install --verbose
