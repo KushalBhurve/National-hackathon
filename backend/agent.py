@@ -6,6 +6,8 @@ import warnings
 import hashlib  # Added for generating unique Doc IDs
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
+from langchain_core.prompts import PromptTemplate
+
 # 1. Disable SSL Warnings
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 warnings.simplefilter('ignore', InsecureRequestWarning)
@@ -93,6 +95,7 @@ class GraphState(TypedDict):
     error_log: Optional[str]
 
 # --- 4. TRIPLE INGESTION NODE (Entities + Neo4j Chunks + Chroma Chunks) ---
+# --- 4. TRIPLE INGESTION NODE (Entities + Neo4j Chunks + Chroma Chunks) ---
 def ingest_node(state: GraphState):
     print("\n--- AGENT: STARTING COMPLETE INGESTION ---")
     
@@ -111,10 +114,17 @@ def ingest_node(state: GraphState):
             # Extract Metadata
             if "Content: " in content:
                 meta_part, text_part = content.split("Content: ", 1)
+                
+                # Parsing logic
                 if "Machinery: " in meta_part:
                     machinery = meta_part.split("Machinery: ")[1].split(".")[0].strip()
                 if "Document Type: " in meta_part:
                     manual_type = meta_part.split("Document Type: ")[1].split(".")[0].strip()
+
+            # --- FIX 1: Warning if text is empty after parsing ---
+            if not text_part or not text_part.strip():
+                print(f"   > SKIPPING: Metadata found, but content text is empty.")
+                continue
 
             # Generate Unique ID
             content_hash = hashlib.md5(text_part.encode('utf-8')).hexdigest()[:8]
@@ -135,21 +145,29 @@ def ingest_node(state: GraphState):
         except Exception as e:
             print(f"   > Metadata Parsing Failed: {e}")
 
+    # If parsing failed for all docs, exit early
+    if not docs_to_process:
+        print("   > No valid documents to process.")
+        return {"error_log": "no_valid_docs"}
+
     # ---------------------------------------------------------
     # STEP 2: KNOWLEDGE GRAPH (ENTITIES)
     # ---------------------------------------------------------
     print("   > [1/3] Extracting Entities (Nodes & Relationships)...")
-    transformer = LLMGraphTransformer(llm=llm)
-    graph_documents = transformer.convert_to_graph_documents(docs_to_process)
+    try:
+        transformer = LLMGraphTransformer(llm=llm)
+        graph_documents = transformer.convert_to_graph_documents(docs_to_process)
 
-    # Inject metadata into every Entity Node (e.g., "Valve" gets "machinery: Drill")
-    for graph_doc in graph_documents:
-        source_meta = graph_doc.source.metadata
-        for node in graph_doc.nodes:
-            node.properties.update(source_meta)
+        # Inject metadata into every Entity Node
+        for graph_doc in graph_documents:
+            source_meta = graph_doc.source.metadata
+            for node in graph_doc.nodes:
+                node.properties.update(source_meta)
 
-    graph.add_graph_documents(graph_documents)
-    print(f"   > Saved Entities to Neo4j.")
+        graph.add_graph_documents(graph_documents)
+        print(f"   > Saved Entities to Neo4j.")
+    except Exception as e:
+        print(f"   > KG Extraction Warning: {e}")
 
     # ---------------------------------------------------------
     # STEP 3: PREPARE CHUNKS
@@ -158,32 +176,44 @@ def ingest_node(state: GraphState):
     chunked_docs = text_splitter.split_documents(docs_to_process)
     print(f"   > Created {len(chunked_docs)} chunks.")
 
+    # --- FIX 2: GUARD CLAUSE (Prevents ChromaDB Crash) ---
+    if not chunked_docs:
+        print("   > WARNING: No text chunks created. Skipping Vector Indexing to prevent crash.")
+        return {"error_log": "no_chunks_created"}
+
     # ---------------------------------------------------------
     # STEP 4: NEO4J VECTOR INDEX (CREATES 'DocumentChunk' NODES)
     # ---------------------------------------------------------
     print("   > [2/3] Indexing Chunks in Neo4j...")
     
-    Neo4jVector.from_documents(
-        chunked_docs,
-        embeddings,
-        url=NEO4J_URI,
-        username=NEO4J_USERNAME,
-        password=NEO4J_PASSWORD,
-        index_name="factory_vector_index", 
-        node_label="DocumentChunk",        
-        embedding_node_property="embedding" 
-    )
-    print("   > 'DocumentChunk' nodes created in Neo4j.")
+    try:
+        Neo4jVector.from_documents(
+            chunked_docs,
+            embeddings,
+            url=NEO4J_URI,
+            username=NEO4J_USERNAME,
+            password=NEO4J_PASSWORD,
+            index_name="factory_vector_index", 
+            node_label="DocumentChunk",        
+            embedding_node_property="embedding",
+            enhanced_schema=True
+        )
+        print("   > 'DocumentChunk' nodes created in Neo4j.")
+    except Exception as e:
+        print(f"   > Neo4j Vector Error: {e}")
 
     # ---------------------------------------------------------
     # STEP 5: CHROMADB VECTOR INGESTION
     # ---------------------------------------------------------
     print("   > [3/3] Indexing Chunks in ChromaDB...")
-    vector_store_chroma.add_documents(chunked_docs)
-    print("   > Saved to local ChromaDB.")
+    try:
+        vector_store_chroma.add_documents(chunked_docs)
+        print("   > Saved to local ChromaDB.")
+    except Exception as e:
+        print(f"   > ChromaDB Error: {e}")
+        return {"error_log": str(e)}
 
     return {"error_log": None}
-
     
 # --- 5. REFACTOR NODE ---
 def refactor_node(state: GraphState):
@@ -229,12 +259,58 @@ def get_knowledge_graph_filters():
 
 # --- 8. HYBRID RETRIEVAL (VECTOR + GRAPH) ---
 
+def get_dynamic_schema_context(graph, selected_machine=None):
+    """
+    Fetches key values (IDs) specifically for the selected machine
+    to help the LLM map 'bench lathe' -> 'Bench_Lathe'.
+    """
+    context_data = {
+        "valid_machines": "",
+        "valid_labels": "",
+        "relevant_ids": "" 
+    }
+    
+    try:
+        # 1. Get valid machines (Global)
+        result = graph.query("MATCH (n) WHERE n.machinery IS NOT NULL RETURN DISTINCT n.machinery as m")
+        context_data["valid_machines"] = ", ".join([r['m'] for r in result])
+        
+        # 2. Get valid labels (Global)
+        labels_result = graph.query("CALL db.labels()")
+        valid_labels = [r['label'] for r in labels_result if r['label'] not in ['Document', 'DocumentChunk']]
+        context_data["valid_labels"] = ", ".join(valid_labels)
+
+        # 3. Get Relevant IDs for the SPECIFIC Machine (Context Injection)
+        if selected_machine and selected_machine != "All":
+            # We fetch IDs only for the semantic nodes (Machine, Organization, Part, etc.)
+            # We exclude 'DocumentChunk' to keep the list clean.
+            query_ids = f"""
+            MATCH (n) 
+            WHERE n.machinery = '{selected_machine}' 
+            AND NOT 'DocumentChunk' IN labels(n)
+            AND NOT 'Document' IN labels(n)
+            RETURN DISTINCT n.id as id
+            LIMIT 100
+            """
+            id_result = graph.query(query_ids)
+            ids_list = [str(r['id']) for r in id_result if r['id']]
+            context_data["relevant_ids"] = ", ".join(ids_list)
+        else:
+            context_data["relevant_ids"] = "No specific machine selected, so no specific IDs loaded."
+
+        return context_data
+
+    except Exception as e:
+        print(f"Error in schema context: {e}")
+        return context_data
+
+
 def process_chat_query(request):
     """
-    Hybrid Retrieval:
-    1. Vector Search (Chroma) for unstructured text logic.
-    2. Graph Search (Neo4j) for structured relationship logic (Cypher).
-    3. Synthesize both into a final answer.
+    Hybrid Retrieval with Dynamic Context Injection:
+    1. Vector Search (Chroma) for unstructured text.
+    2. Graph Search (Neo4j) with LIVE schema & ID awareness.
+    3. Synthesize both.
     """
     query = request.query
     sources = request.selected_sources
@@ -294,28 +370,77 @@ def process_chat_query(request):
     graph_trace = "Graph Query Skipped or Failed"
 
     try:
-        # 1. FORCE SCHEMA REFRESH (CRITICAL FOR DYNAMIC AGENTS)
-        # This makes the LLM aware of new nodes/properties (like 'machinery') immediately.
+        # 1. CRITICAL: REFRESH SCHEMA STRUCTURE
         graph.refresh_schema()
-        print("   > Graph Schema Refreshed.")
+        
+        # 2. CRITICAL: FETCH DYNAMIC VALUES (Schema + Actual IDs)
+        # We pass the 'machine' so we get IDs specific to 'abcd', 'vevor', etc.
+        dynamic_context = get_dynamic_schema_context(graph, selected_machine=machine)
+        
+        print(f"   > Injected IDs (Snippet): {dynamic_context['relevant_ids'][:100]}...")
+        
+        # 3. DEFINE A ROBUST PROMPT WITH ID INJECTION
+        cypher_generation_template = """
+        Task: Generate Cypher statement to query a graph database.
+        
+        Schema:
+        {schema}
+        
+        CRITICAL DATA CONTEXT:
+        1. Valid Machinery Names: [{valid_machines}]
+        2. Valid Node Labels: [{valid_labels}]
+        
+        3. *** ACTUAL NODE IDs FOUND IN DB FOR THIS MACHINE ***:
+           [{relevant_ids}]
+        
+        Instructions:
+        1. **EXACT MATCHING PRIORITY:** - Check the "ACTUAL NODE IDs" list above.
+           - If the user asks for "bench lathe" and you see "Bench_Lathe" in the list, USE "Bench_Lathe" exactly.
+           - Example: `WHERE n.id = 'Bench_Lathe'` (Preferred over CONTAINS)
+        
+        2. **FUZZY FALLBACK:**
+           - If the specific ID is not in the list, use: `toLower(n.id) CONTAINS toLower('value')`.
+        
+        3. **LABEL FLEXIBILITY:** - If searching for a manufacturer/company, use `(n:Organization|Company)`.
+           - If searching for a machine/product, use `(n:Machine|Product)`.
+        
+        4. **FILTERING:**
+           - Always filter by the `machinery` property if provided.
+        
+        The question is:
+        {query}
+        """
+        
+        cypher_prompt = PromptTemplate(
+            input_variables=["schema", "query", "valid_machines", "valid_labels", "relevant_ids"],
+            template=cypher_generation_template
+        )
 
-        # 2. Initialize Cypher Chain
+        # 4. Initialize Chain with Custom Prompt
         cypher_chain = GraphCypherQAChain.from_llm(
             llm=llm,
             graph=graph,
+            cypher_prompt=cypher_prompt, 
             verbose=True,
             allow_dangerous_requests=True,
             return_direct=True 
         )
         
-        # 3. Prompt Engineering: Guide the LLM to the correct node
+        # 5. Run the Chain
         structured_query = query
         if machine and machine != "All":
-            # We explicitly tell the LLM to look at the 'machinery' property found in the schema
-            structured_query = f"{query} (Look for the Machine node where the property 'machinery' equals '{machine}')"
+            # We guide the LLM to filter by the property
+            structured_query = f"{query} (Filter for the entity where property 'machinery' is '{machine}')"
 
         print(f"   > Generating Cypher for: {structured_query}")
-        graph_result = cypher_chain.invoke(structured_query)
+        
+        # Pass the dynamic values into the chain
+        graph_result = cypher_chain.invoke({
+            "query": structured_query,
+            "valid_machines": dynamic_context['valid_machines'],
+            "valid_labels": dynamic_context['valid_labels'],
+            "relevant_ids": dynamic_context['relevant_ids'] # <--- INJECT IDs HERE
+        })
         
         # --- DEBUG: PRINT RETRIEVED NODE ---
         print(f"   > RAW GRAPH RESULT: {graph_result}")
