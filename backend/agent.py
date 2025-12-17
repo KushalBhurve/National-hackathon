@@ -52,7 +52,7 @@ from langchain_neo4j import GraphCypherQAChain
 # Neo4j Config
 NEO4J_URI = "bolt://localhost:7687"
 NEO4J_USERNAME = "neo4j"
-NEO4J_PASSWORD = "KulVishSuh" 
+NEO4J_PASSWORD = "Rag1234##" 
 
 # ChromaDB Config
 CHROMA_PATH = "./chroma_db_store"
@@ -391,107 +391,134 @@ def get_machine_neighborhood_context(machine_name, allowed_sources=None):
     
 
 def process_chat_query(request):
-    """
-    Revised Hybrid Retrieval:
-    1. Vector Search: Finds generic text in Chroma (Filtered by Source).
-    2. Graph Search: Finds structured connections (Filtered by Source).
-    3. Synthesis: Combines both.
-    """
     query = request.query
-    sources = request.selected_sources # This is the list from frontend (e.g. ['Maintenance Manual'])
+    sources = request.selected_sources 
     machine = request.selected_machine
 
-    print(f"\n--- PROCESSING HYBRID CHAT (STAR SCHEMA MODE) ---")
-    print(f"Query: {query}")
-    print(f"Target Machine: '{machine}'")
-    print(f"Active Sources: {sources}")
+    # Initialize data structures for Frontend
+    trace_graph = {"nodes": [], "links": []}
+    citations = []
+    seen_nodes = set()
 
-    # --- 1. VECTOR RETRIEVAL (Unstructured Text) ---
-    print(" > Step 1: Querying Vector Store...")
+    def add_to_trace(node_id, name, role="knowledge"):
+        if node_id not in seen_nodes:
+            trace_graph["nodes"].append({"id": str(node_id), "name": name, "role": role})
+            seen_nodes.add(node_id)
+
+    add_to_trace("user_query", "User Query", role="start")
+
+    if not sources:
+        return {"answer": "Please select at least one data source.", "trace": trace_graph, "citations": []}
+
+    # --- STEP 1: VECTOR RETRIEVAL ---
     conditions = []
-    
-    # Existing Vector Filter Logic
     if len(sources) == 1:
         conditions.append({"manual_type": sources[0]})
-    elif len(sources) > 1:
-        or_block = [{"manual_type": src} for src in sources]
-        conditions.append({"$or": or_block})
+    else:
+        conditions.append({"$or": [{"manual_type": src} for src in sources]})
     
     if machine and machine != "All":
         conditions.append({"machinery": machine})
 
-    final_filter = {}
-    if len(conditions) == 1: final_filter = conditions[0]
-    elif len(conditions) > 1: final_filter = {"$and": conditions}
-
-    search_kwargs = {"k": 5} 
-    if final_filter: search_kwargs["filter"] = final_filter
-
-    vector_docs = vector_store_chroma.as_retriever(search_kwargs=search_kwargs).invoke(query)
-    vector_context_str = "\n\n".join([f"Source: {d.metadata.get('doc_id')}\nContent: {d.page_content}" for d in vector_docs])
-
-    # --- 2. GRAPH RETRIEVAL (Structured Neighborhood) ---
-    print(" > Step 2: Fetching Graph Neighborhood...")
+    final_filter = conditions[0] if len(conditions) == 1 else {"$and": conditions}
     
-    # *** UPDATE: PASS SOURCES HERE ***
-    graph_context_str = get_machine_neighborhood_context(machine, allowed_sources=sources)
-    
-    print(f"   Graph Context Length: {len(graph_context_str)} chars")
+    retriever = vector_store_chroma.as_retriever(search_kwargs={"k": 3, "filter": final_filter})
+    vector_docs = retriever.invoke(query)
 
-    # --- 3. HYBRID SYNTHESIS ---
-    print(" > Step 3: Synthesizing Answer...")
-    
+    for i, doc in enumerate(vector_docs):
+        doc_id = f"vec_{i}"
+        citations.append({
+            "id": f"cite_vec_{i}",
+            "source_name": doc.metadata.get("manual_type", "Reference Manual"),
+            "snippet": doc.page_content[:200] + "...",
+            "node_id": doc_id,
+            "confidence": 0.95
+        })
+        add_to_trace(doc_id, f"Doc Chunk: {doc.metadata.get('manual_type', 'Manual')}", role="source")
+        trace_graph["links"].append({"source": "user_query", "target": doc_id})
+
+    vector_context_str = "\n\n".join([d.page_content for d in vector_docs])
+
+    # --- STEP 2: GRAPH RETRIEVAL (DYNAMIC CYPHER) ---
+    graph_context_str = "No graph data found."
+    try:
+        graph.refresh_schema()
+        dyn_ctx = get_dynamic_schema_context(graph, selected_machine=machine)
+        
+        cypher_generation_template = """
+        Task: Generate Cypher statement to query a graph database.
+        Schema: {schema}
+        
+        CRITICAL DATA CONTEXT:
+        1. Valid Machinery: [{valid_machines}]
+        2. Valid Labels: [{valid_labels}]
+        3. ACTUAL IDs IN DB: [{relevant_ids}]
+        
+        Instructions:
+        1. If user says 'bench lathe' and 'Bench_Lathe' is in ACTUAL IDs, use `n.id = 'Bench_Lathe'`.
+        2. Filter by `machinery` property: `{machine}`.
+        
+        Question: {query}
+        """
+        
+        cypher_prompt = PromptTemplate(
+            input_variables=["schema", "query", "valid_machines", "valid_labels", "relevant_ids", "machine"],
+            template=cypher_generation_template
+        )
+
+        cypher_chain = GraphCypherQAChain.from_llm(
+            llm=llm, graph=graph, cypher_prompt=cypher_prompt, 
+            verbose=True, allow_dangerous_requests=True, return_direct=True 
+        )
+        
+        graph_result = cypher_chain.invoke({
+            "query": query,
+            "machine": machine,
+            "valid_machines": dyn_ctx['valid_machines'],
+            "valid_labels": dyn_ctx['valid_labels'],
+            "relevant_ids": dyn_ctx['relevant_ids']
+        })
+        
+        raw_graph_data = graph_result.get('result', [])
+        if raw_graph_data:
+            graph_context_str = str(raw_graph_data)
+            for item in raw_graph_data:
+                if isinstance(item, dict) and 'id' in item:
+                    add_to_trace(item['id'], item.get('name', item['id']), role="knowledge")
+                    trace_graph["links"].append({"source": "user_query", "target": item['id']})
+    except Exception as e:
+        print(f"Graph Error: {e}")
+
+    # --- STEP 3: HYBRID SYNTHESIS ---
     prompt = ChatPromptTemplate.from_template(
-        """You are an industrial expert assistant for FactoryOS.
+        """You are a FactoryOS industrial expert.
+        Use the following retrieved data to answer the user.
         
-        You have two information sources to answer the user's question.
-        BOTH sources have been filtered to only include data from: {allowed_sources_str}
-        
-        SOURCE 1: KNOWLEDGE GRAPH (The specific machine's direct connections)
-        {graph_context}
-        
-        SOURCE 2: VECTOR SEARCH (Relevant text excerpts from manuals)
-        {vector_context}
+        STRUCTURED GRAPH DATA: {graph_context}
+        UNSTRUCTURED MANUAL TEXT: {vector_context}
         
         USER QUESTION: {query}
         
-        INSTRUCTIONS:
-        1. Prioritize SOURCE 1 for facts about relationships.
-        2. Use SOURCE 2 for detailed procedures.
-        3. If you cannot find the answer in these specific sources, state that the active data filters may be excluding the answer.
-        
-        Answer professionally and concisely:"""
+        Instruction: If the answer isn't in the data, explain that active filters ({sources}) might be hiding it."""
     )
 
     chain = (
         {
-            "graph_context": lambda x: graph_context_str,
-            "vector_context": lambda x: vector_context_str,
-            "allowed_sources_str": lambda x: ", ".join(sources),
-            "query": lambda x: query
+            "graph_context": lambda x: graph_context_str, 
+            "vector_context": lambda x: vector_context_str, 
+            "query": lambda x: query,
+            "sources": lambda x: ", ".join(sources)
         }
-        | prompt 
-        | llm 
-        | StrOutputParser()
+        | prompt | llm | StrOutputParser()
     )
 
-    try:
-        response_text = chain.invoke(query)
-        trace_steps = [
-            f"Active Filters: {sources}",
-            f"Vector Results: {len(vector_docs)} chunks found",
-            f"Graph Context: Fetched neighborhood for '{machine}'",
-            "Hybrid Answer Generated"
-        ]
-    except Exception as e:
-        response_text = "I encountered an error generating the response."
-        trace_steps = [f"Error: {str(e)}"]
+    response_text = chain.invoke(query)
 
     return {
         "answer": response_text,
-        "trace": trace_steps
+        "trace": trace_graph,
+        "citations": citations 
     }
-
 
 def add_technician_to_graph(tech: dict):
     """

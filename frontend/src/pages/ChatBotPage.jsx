@@ -1,8 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import GraphVisualizer from './GraphVisualizer';
+import CitationGallery from './CitationGallery'; // Import the new component
+import CitationModal from './CitationModal';
 
 const ChatbotPage = () => {
   const navigate = useNavigate();
+
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [activeCitation, setActiveCitation] = useState(null);
+
+  const openAuditModal = (citation) => {
+    setActiveCitation(citation);
+    setIsModalOpen(true);
+  };
   
   // --- UI STATE ---
   const [isCollapsed, setIsCollapsed] = useState(true);
@@ -31,8 +42,9 @@ const ChatbotPage = () => {
   const [selectedSources, setSelectedSources] = useState({}); // Stores { "Source Name": true/false }
 
   // Debug Trace Log
-  const [lastTrace, setLastTrace] = useState([]);
-
+  const [lastTrace, setLastTrace] = useState({ nodes: [], links: [] });
+  const [currentCitations, setCurrentCitations] = useState([]); // Store citations for the latest message
+  const [selectedNodeId, setSelectedNodeId] = useState(null); // Linked between Gallery and Graph
   // --- EFFECTS ---
   
   // 1. Fetch Filters (Machines & Sources) on Mount
@@ -78,6 +90,11 @@ const ChatbotPage = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isLoading]);
+
+  const handleCitationClick = (nodeId) => {
+    // When a citation card is clicked, we highlight the node in the graph
+    setSelectedNodeId(nodeId);
+  };
 
   // --- HANDLERS ---
 
@@ -133,10 +150,12 @@ const ChatbotPage = () => {
       setMessages(prev => [...prev, { 
         role: 'assistant', 
         text: data.answer,
-        trace: data.trace 
+        trace: data.trace,
+        citations: data.citations || [] // Assuming backend provides this
       }]);
       
-      setLastTrace(data.trace || []);
+    setLastTrace(data.trace && data.trace.nodes ? data.trace : { nodes: [], links: [] });
+    setCurrentCitations(data.citations || []); // Update citations panel
 
     } catch (error) {
       console.error("Chat Error:", error);
@@ -382,28 +401,72 @@ const ChatbotPage = () => {
                     </p>
                 </div>
             </main>
+            <CitationModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        citation={activeCitation} 
+      />
 
-            {/* 3. RIGHT SIDEBAR: DEBUG CONSOLE */}
-            <aside className="w-96 flex flex-col border-l border-slate-200 dark:border-[#233648] bg-white dark:bg-[#0b1219] shrink-0 z-10 shadow-xl hidden xl:flex">
-                <div className="flex items-center border-b border-slate-200 dark:border-[#233648]">
-                    <button className="flex-1 px-4 py-3 text-sm font-medium border-b-2 border-[#137fec] text-slate-900 dark:text-white bg-white dark:bg-[#1a2632]">
-                        Agent Trace
-                    </button>
-                </div>
-                <div className="flex-1 overflow-y-auto p-4 font-mono text-xs">
-                    {lastTrace.length === 0 ? (
-                        <div className="text-slate-500 italic text-center mt-10">No trace available.</div>
-                    ) : (
-                        lastTrace.map((step, i) => (
-                            <div key={i} className="mb-4 relative pl-4 border-l border-slate-300 dark:border-[#233648]">
-                                <div className="absolute -left-1.5 top-0 size-3 rounded-full bg-blue-500 border-2 border-[#0b1219]"></div>
-                                <div className="mb-1 flex items-center gap-2"><span className="text-blue-500 font-bold">STEP {i + 1}</span></div>
-                                <div className="bg-slate-100 dark:bg-[#101922] p-2 rounded text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-[#233648]">{step}</div>
-                            </div>
-                        ))
-                    )}
-                </div>
-            </aside>
+            {/* 3. RIGHT SIDEBAR: GRAPH VISUALIZER */}
+{/* 3. RIGHT SIDEBAR: AUDIT HUB */}
+<aside className="w-96 flex flex-col border-l border-slate-200 dark:border-[#233648] bg-white dark:bg-[#0b1219] shrink-0 z-10 shadow-xl hidden lg:flex h-full">
+    
+    {/* HEADER (Fixed) */}
+    <div className="shrink-0 border-b border-slate-200 dark:border-[#233648] bg-[#1a2632]">
+        <button className="w-full px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-[#137fec] text-left">
+            Knowledge Audit Trail
+        </button>
+    </div>
+    
+    {/* SECTION 1: GRAPH (Fixed 40% Height) */}
+    <div className="h-[40%] relative border-b border-slate-800 bg-[#0b1219]">
+        {lastTrace?.nodes?.length > 0 ? (
+            <GraphVisualizer 
+                traceData={lastTrace} 
+                activeNodeId={selectedNodeId}
+                dimensions={{ width: 384, height: 350 }} 
+            />
+        ) : (
+            <div className="flex flex-col items-center justify-center h-full text-slate-600 opacity-40">
+                <span className="material-symbols-outlined text-4xl mb-2">account_tree</span>
+                <p className="text-[10px] font-bold">AWAITING TRAVERSAL</p>
+            </div>
+        )}
+    </div>
+
+    {/* SECTION 2: CITATIONS (Flexible Space) */}
+
+
+    {/* SECTION 3: EXECUTION LOG (Fixed 25% Height or h-48) */}
+    <div className="h-48 shrink-0 overflow-y-auto p-4 font-mono text-[10px] bg-[#0b1219] text-slate-400">
+        <p className="text-[#137fec] mb-2 font-bold underline uppercase tracking-widest">Execution Trace</p>
+        {/* If you want actual logs here, map through trace steps */}
+        <div className="space-y-1 opacity-60">
+            <p> [SYSTEM] Hybrid retrieval initialized...</p>
+            <p> [GRAPH] Querying Neo4j for {selectedMachine}...</p>
+            <p> [VECTOR] Chroma similarity search complete.</p>
+        </div>
+    </div>
+
+    {/* FOOTER (Fixed) */}
+    <div className="h-10 shrink-0 px-4 flex items-center justify-between bg-[#111418] border-t border-slate-800">
+        <span className="text-[9px] text-slate-500 font-mono uppercase">Nodes: {lastTrace.nodes.length}</span>
+        <div className="flex items-center gap-1.5">
+             <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+             <span className="text-[9px] text-emerald-500 font-bold font-mono uppercase">Audit Ready</span>
+        </div>
+    </div>
+
+    <div className="flex-1 overflow-y-auto">
+          <CitationGallery 
+            citations={currentCitations} 
+            onCitationClick={handleCitationClick}
+            onOpenModal={openAuditModal} // Pass the opener function
+            activeNodeId={selectedNodeId}
+          />
+        </div>
+
+</aside>
         </div>
       </div>
     </div>

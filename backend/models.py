@@ -59,10 +59,31 @@ class AgentStep(BaseModel):
     description: str
     details: Optional[Dict[str, Any]] = None
 
+class TraceNode(BaseModel):
+    id: str
+    name: str
+    role: str = "knowledge"  # e.g., "start", "source", "knowledge"
+
+class TraceLink(BaseModel):
+    source: str
+    target: str
+
+class GraphTrace(BaseModel):
+    nodes: List[TraceNode]
+    links: List[TraceLink]
+
+class Citation(BaseModel):
+    id: str
+    source_name: str      # e.g., "Maintenance_Manual_V2.pdf"
+    snippet: str          # The specific text used
+    page_number: Optional[int] = None
+    node_id: str          # Must match an ID in the Graph Trace
+    confidence: float     # 0.0 to 1.0
 
 class ChatResponse(BaseModel):
     answer: str
-    trace: List[str]
+    trace: GraphTrace
+    citations: List[Citation] = []
 
 class FilterOptions(BaseModel):
     machinery: List[str]
