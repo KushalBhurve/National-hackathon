@@ -10,7 +10,8 @@ const SystemArchitecture = () => {
     ingestion: [
       { id: "input", title: "Unstructured Data", type: "Source", icon: "description", color: "#3b82f6" },
       { id: "splitter", title: "Semantic Splitter", type: "LangChain Agent", icon: "account_tree", color: "#8b5cf6" },
-      { id: "transformer", title: "Graph Transformer", type: "GPT-4o Reasoning", icon: "psychology", color: "#10b981" },
+      // UPDATED: Added 'highlight' property here
+      { id: "transformer", title: "Graph Transformer", type: "GPT-4o Reasoning", icon: "psychology", color: "#10b981", highlight: "Significance Mapping" },
       { id: "storage", title: "Neo4j + ChromaDB", type: "Hybrid DB", icon: "database", color: "#f59e0b" }
     ],
     retrieval: [
@@ -103,9 +104,18 @@ const SystemArchitecture = () => {
                   </div>
                   
                   <h3 className="text-md font-bold text-white text-center font-['Space_Grotesk'] leading-tight">{node.title}</h3>
+                  
                   <div className="mt-3 px-3 py-1 bg-slate-800/50 rounded-full border border-slate-700/50">
                     <span className="text-[10px] text-slate-400 font-mono tracking-widest">{node.type}</span>
                   </div>
+
+                  {/* UPDATED: Logic to display the Highlight Point if it exists */}
+                  {node.highlight && (
+                    <div className="mt-2 flex items-center gap-1">
+                        <span className="w-1 h-1 bg-emerald-400 rounded-full animate-pulse"></span>
+                        <span className="text-[10px] text-emerald-400/80 font-mono">{node.highlight}</span>
+                    </div>
+                  )}
                 </div>
               </motion.div>
             ))}
