@@ -7,6 +7,8 @@ import hashlib  # Added for generating unique Doc IDs
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_text_splitters import TokenTextSplitter # <--- NEW IMPORT
+import logging
+logger = logging.getLogger("uvicorn")
 
 from langchain_core.prompts import PromptTemplate
 
@@ -54,6 +56,7 @@ load_dotenv()
 NEO4J_URI = "bolt://localhost:7687"
 NEO4J_USERNAME = "neo4j"
 NEO4J_PASSWORD = "KulVishSuh" 
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 
 # ChromaDB Config
 CHROMA_PATH = "./chroma_db_store"
@@ -128,17 +131,17 @@ def add_machine_to_graph(machine_data: dict):
     
     try:
         graph.query(query, params)
-        print(f" > Added Machinery: {machine_data['name']}")
+        logger.info(f" > Added Machinery: {machine_data['name']}")
         return True
     except Exception as e:
-        print(f"Error adding machinery: {e}")
+        logger.info(f"Error adding machinery: {e}")
         return False
 
     
 # In agent.py
 
 def ingest_node(state: GraphState):
-    print("\n--- AGENT: STARTING SEMANTIC INGESTION ---")
+    logger.info("\n--- AGENT: STARTING SEMANTIC INGESTION ---")
     docs_to_process = []
     
     # 1. PARSE & PREPARE (Handles both Strings and Objects)
@@ -188,14 +191,14 @@ def ingest_node(state: GraphState):
             docs_to_process.append(doc)
             
         except Exception as e:
-            print(f"Metadata Parse Error: {e}")
+            logger.info(f"Metadata Parse Error: {e}")
 
     if not docs_to_process: return {"error_log": "no_valid_docs"}
 
     # 2. PRE-SPLIT FOR SAFETY
     # --- FIX IS HERE: Reduced chunk_size from 4000 to 2000 ---
     # Large chunks cause the LLM to hallucinate incomplete relationships (missing target_id)
-    print("   > Safety Splitting for Context Window...")
+    logger.info("   > Safety Splitting for Context Window...")
     
     text_splitter = TokenTextSplitter(
         chunk_size=2000,   # Reduced from 4000 to prevent JSON Errors
@@ -203,10 +206,10 @@ def ingest_node(state: GraphState):
     )
     
     safe_graph_docs = text_splitter.split_documents(docs_to_process)
-    print(f"   > Split {len(docs_to_process)} raw docs into {len(safe_graph_docs)} safe processing chunks.")
+    logger.info(f"   > Split {len(docs_to_process)} raw docs into {len(safe_graph_docs)} safe processing chunks.")
 
     # 3. EXTRACT ENTITIES
-    print("   > Extracting Entities...")
+    logger.info("   > Extracting Entities...")
     try:
         # Optional: Define allowed nodes/rels to further stabilize the LLM
         # allowed_nodes = ["Machinery", "Part", "Issue", "Action", "Technician"]
@@ -228,21 +231,21 @@ def ingest_node(state: GraphState):
                     node.properties.update(source_meta)
                     
         graph.add_graph_documents(graph_documents)
-        print(f"   > Successfully extracted Knowledge Graph from {len(graph_documents)} chunks.")
+        logger.info(f"   > Successfully extracted Knowledge Graph from {len(graph_documents)} chunks.")
         
     except Exception as e:
         # We catch the error so the Vector Indexing (below) still happens even if Graph fails
-        print(f"   > KG Extraction Skipped due to LLM Validation Error: {e}")
+        logger.info(f"   > KG Extraction Skipped due to LLM Validation Error: {e}")
 
     # 4. SEMANTIC VECTOR INDEXING (Vector Store handles large contexts better, so this is fine)
-    print("   > Performing Semantic Splitting...")
+    logger.info("   > Performing Semantic Splitting...")
     semantic_splitter = SemanticChunker(
         embeddings, 
         breakpoint_threshold_type="percentile" 
     )
     
     chunked_docs = semantic_splitter.split_documents(docs_to_process)
-    print(f"   > Created {len(chunked_docs)} semantic chunks.")
+    logger.info(f"   > Created {len(chunked_docs)} semantic chunks.")
     
     if chunked_docs:
         # Neo4j Vector
@@ -251,15 +254,15 @@ def ingest_node(state: GraphState):
                 chunked_docs, embeddings, url=NEO4J_URI, username=NEO4J_USERNAME, password=NEO4J_PASSWORD,
                 index_name="factory_vector_index", node_label="DocumentChunk", embedding_node_property="embedding"
             )
-        except Exception as e: print(f"Neo4j Vector Error: {e}")
+        except Exception as e: logger.info(f"Neo4j Vector Error: {e}")
         
         # Chroma Vector
         try:
             vector_store_chroma.add_documents(chunked_docs)
-        except Exception as e: print(f"Chroma Vector Error: {e}")
+        except Exception as e: logger.info(f"Chroma Vector Error: {e}")
 
     # 5. LINK DOCUMENT TO MACHINERY
-    print("   > Linking Semantic Chunks to Machinery...")
+    logger.info("   > Linking Semantic Chunks to Machinery...")
     for doc in docs_to_process:
         target_machine = doc.metadata.get("machinery")
         doc_id = doc.metadata.get("doc_id")
@@ -273,7 +276,7 @@ def ingest_node(state: GraphState):
             """
             try:
                 graph.query(link_query, {"doc_id": doc_id, "machine_name": target_machine})
-            except Exception as e: print(f"Linking Error: {e}")
+            except Exception as e: logger.info(f"Linking Error: {e}")
 
     return {"error_log": None}
    
@@ -342,7 +345,7 @@ def get_knowledge_graph_filters():
             "sources": sorted(list(set(sources))) 
         }
     except Exception as e:
-        print(f"Error fetching filters: {e}")
+        logger.info(f"Error fetching filters: {e}")
         return {"machinery": [], "sources": []}
 
 # --- 8. HYBRID RETRIEVAL (VECTOR + GRAPH) ---
@@ -389,7 +392,7 @@ def get_dynamic_schema_context(graph, selected_machine=None):
         return context_data
 
     except Exception as e:
-        print(f"Error in schema context: {e}")
+        logger.info(f"Error in schema context: {e}")
         return context_data
 
 def get_machine_neighborhood_context(machine_name, allowed_sources=None):
@@ -551,7 +554,7 @@ def process_chat_query(request):
                     add_to_trace(item['id'], item.get('name', item['id']), role="knowledge")
                     trace_graph["links"].append({"source": "user_query", "target": item['id']})
     except Exception as e:
-        print(f"Graph Error: {e}")
+        logger.info(f"Graph Error: {e}")
 
     # --- STEP 3: HYBRID SYNTHESIS ---
     prompt = ChatPromptTemplate.from_template(
@@ -611,10 +614,10 @@ def add_technician_to_graph(tech: dict):
     
     try:
         graph.query(query, params)
-        print(f" > Added Technician: {tech['name']}")
+        logger.info(f" > Added Technician: {tech['name']}")
         return True
     except Exception as e:
-        print(f"Error adding technician: {e}")
+        logger.info(f"Error adding technician: {e}")
         return False
     
 def add_task_to_graph(task: dict):
@@ -655,10 +658,10 @@ def add_task_to_graph(task: dict):
 
     try:
         graph.query(query, params)
-        print(f" > SUCCESS: Task '{task['title']}' linked to Machine '{task['target_machine']}'")
+        logger.info(f" > SUCCESS: Task '{task['title']}' linked to Machine '{task['target_machine']}'")
         return True
     except Exception as e:
-        print(f"Error adding task: {e}")
+        logger.info(f"Error adding task: {e}")
         return False
 
 def get_graph_statistics():
@@ -684,7 +687,7 @@ def get_graph_statistics():
         stats["total_triples"] = graph.query(q_rels)[0]["count"]
         
     except Exception as e:
-        print(f"Error fetching stats: {e}")
+        logger.info(f"Error fetching stats: {e}")
     
-    print(stats)
+    logger.info(stats)
     return stats

@@ -4,22 +4,39 @@ from typing import List, Dict, Any
 import uuid
 import datetime
 import json
-import asyncio 
 from dotenv import load_dotenv
 import base64
-from agent import llm  # Import your configured LLM
 from langchain_core.messages import HumanMessage
 import traceback
 import asyncio # You likely already have this
+import logging
+logger = logging.getLogger("uvicorn")
 
 load_dotenv()
 from models import (
-    DataSource, DashboardStats, ComplianceAlert, Topology, 
-    ChatRequest, ChatResponse, FilterOptions, TechnicianInput, TaskInput, MachineInput, 
+    DataSource, 
+    DashboardStats, 
+    ComplianceAlert, 
+    Topology, 
+    ChatRequest, 
+    ChatResponse, 
+    FilterOptions, 
+    TechnicianInput, 
+    TaskInput, 
+    MachineInput, 
 )
 from data import DATA_SOURCES, STATS
 import fitz  # PyMuPDF
-from agent import graph_workflow, process_chat_query, get_knowledge_graph_filters, add_technician_to_graph, add_task_to_graph, add_machine_to_graph, graph, get_graph_statistics
+from agent import (
+    graph_workflow, 
+    process_chat_query, 
+    get_knowledge_graph_filters, 
+    add_technician_to_graph, 
+    add_task_to_graph, 
+    add_machine_to_graph, 
+    graph, 
+    get_graph_statistics, 
+    llm)
 from work_order_agent import WorkOrderAssignmentAgent
 from pydantic import BaseModel
 
@@ -89,10 +106,10 @@ def create_work_order_in_graph(wo_data: dict):
     
     try:
         graph.query(query, wo_data)
-        print(f" > SUCCESS: WorkOrder {wo_data['id']} seeded to Graph.")
+        logger.info(f" > SUCCESS: WorkOrder {wo_data['id']} seeded to Graph.")
         return True
     except Exception as e:
-        print(f" > ERROR writing WorkOrder to Graph: {e}")
+        logger.info(f" > ERROR writing WorkOrder to Graph: {e}")
         return False
 
 # --- Simulation & Agent Trigger Endpoint ---
@@ -121,7 +138,7 @@ async def safe_analyze_image(image_bytes):
         try:
             return await analyze_image_with_gpt4o(image_bytes)
         except Exception as e:
-            print(f"Image analysis failed: {e}")
+            logger.info(f"Image analysis failed: {e}")
             return "" # Return empty string on failure so process continues
 
 @app.post("/api/simulation/log")
@@ -198,7 +215,7 @@ async def simulate_log_event():
         }
         
     except Exception as e:
-        print(f"Agent Error: {e}")
+        logger.info(f"Agent Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ... (Rest of Endpoints) ...
@@ -236,7 +253,7 @@ async def ingest_data(
     machinery: str = Form(...), 
     manual_type: str = Form(...)
 ):
-    print(f"--- INGEST: Starting {file.filename} ---")
+    logger.info(f"--- INGEST: Starting {file.filename} ---")
     start_time = datetime.datetime.now()
     
     pdf_bytes = await file.read()
@@ -251,7 +268,7 @@ async def ingest_data(
     # 2. Collect Image Tasks (Do not await them yet!)
     image_tasks = []
     
-    print(" > Extracting images for parallel processing...")
+    logger.info(" > Extracting images for parallel processing...")
     
     for page_index, page in enumerate(doc):
         image_list = page.get_images(full=True)
@@ -274,7 +291,7 @@ async def ingest_data(
             task = safe_analyze_image(image_bytes)
             image_tasks.append(task)
 
-    print(f" > Found {len(image_tasks)} valid images. analyzing concurrently...")
+    logger.info(f" > Found {len(image_tasks)} valid images. analyzing concurrently...")
 
     # 3. Execute all Image Tasks in Parallel
     # This runs them all at the same time (up to the semaphore limit)
@@ -283,7 +300,7 @@ async def ingest_data(
     # 4. Combine Text and Image Descriptions
     final_text_context = "\n".join(full_text_content) + "\n" + "\n".join(image_descriptions)
 
-    print(f" > Content preparation took: {datetime.datetime.now() - start_time}")
+    logger.info(f" > Content preparation took: {datetime.datetime.now() - start_time}")
 
     # 5. Enrich and Run Workflow
     enriched_content = f"Document Type: {manual_type}. Machinery: {machinery}. Content: {final_text_context}"
@@ -401,8 +418,8 @@ async def get_full_graph_visualization():
         }
         
     except Exception as e:
-        print(f"Visualization Error: {e}")
-        # traceback.print_exc() # Uncomment to see full error in terminal
+        logger.info(f"Visualization Error: {e}")
+        # traceback.logger.info_exc() # Uncomment to see full error in terminal
         return {"nodes": [], "links": []}
 
 # --- Helper Function for Colors ---
@@ -450,7 +467,7 @@ async def get_work_order_details(work_order_id: str):
             "assigned_technician": record.get('technician') or "Unassigned"
         }
     except Exception as e:
-        print(f"Graph Fetch Error: {e}")
+        logger.info(f"Graph Fetch Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

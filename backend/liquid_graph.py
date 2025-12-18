@@ -3,6 +3,8 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import re
 from models import Topology, GraphNode, GraphEdge
+import logging
+logger = logging.getLogger("uvicorn")
 
 class LiquidGraph:
     """
@@ -118,7 +120,7 @@ class LiquidGraph:
             return
         
         new_type = pending["o_type"]
-        print(f"⚡ LIQUID SCHEMA: Adapting to new concept '{new_type}'...")
+        logger.info(f"⚡ LIQUID SCHEMA: Adapting to new concept '{new_type}'...")
         
         # 1. Evolve Schema
         self.schema_constraints["labels"].add(new_type)

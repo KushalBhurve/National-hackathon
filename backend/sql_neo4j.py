@@ -2,6 +2,8 @@ import json
 import sqlite3
 import uuid
 from neo4j import GraphDatabase
+import logging
+logger = logging.getLogger("uvicorn")
 
 # --- CONFIGURATION ---
 JSON_FILE = r"C:\Users\GenAICHNSIRUSR20\Desktop\frontend\backend\technician.json"
@@ -13,7 +15,7 @@ NEO4J_AUTH = ("neo4j", "KulVishSuh")
 def save_to_json(data, filename=JSON_FILE):
     with open(filename, 'w') as f:
         json.dump(data, f, indent=4)
-    print(f"Data saved to {filename}")
+    logger.info(f"Data saved to {filename}")
 
 # --- 2. SQLITE SETUP & LOAD ---
 def setup_sqlite():
@@ -45,7 +47,7 @@ def load_json_to_sqlite():
         """, (tech['id'], tech['name'], tech['role'], tech['certification_level'], tech['source'], tech['status']))
     conn.commit()
     conn.close()
-    print("Data loaded from JSON into SQLite.")
+    logger.info("Data loaded from JSON into SQLite.")
 
 # --- 3. NEO4J SYNC LOGIC ---
 class GraphSync:
@@ -90,7 +92,7 @@ class GraphSync:
             self.sync_upsert(dict(row))
         
         conn.close()
-        print(f"Bulk loaded {len(rows)} nodes from SQLite to Neo4j.")
+        logger.info(f"Bulk loaded {len(rows)} nodes from SQLite to Neo4j.")
 
 # --- 4. THE "TRIGGER" WRAPPER ---
 # Because SQLite triggers cannot call Python code directly easily, 
@@ -111,12 +113,12 @@ def db_operation(action, data):
             VALUES (?, ?, ?, ?, ?, ?)
         """, (data['id'], data['name'], data['role'], data['certification_level'], data['source'], data['status']))
         sync.sync_upsert(data)
-        print(f"Action '{action}' performed on ID: {data['id']} (Synced to Neo4j)")
+        logger.info(f"Action '{action}' performed on ID: {data['id']} (Synced to Neo4j)")
 
     elif action == 'delete':
         cursor.execute("DELETE FROM technicians WHERE id = ?", (data['id'],))
         sync.sync_delete(data['id'])
-        print(f"Action 'delete' performed on ID: {data['id']} (Synced to Neo4j)")
+        logger.info(f"Action 'delete' performed on ID: {data['id']} (Synced to Neo4j)")
 
     conn.commit()
     conn.close()

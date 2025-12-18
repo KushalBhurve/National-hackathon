@@ -7,6 +7,8 @@ import hashlib
 from dotenv import load_dotenv
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 from langchain_neo4j import Neo4jGraph
+import logging
+logger = logging.getLogger("uvicorn")
 
 # --- 1. SSL & PROXY PATCH (COPIED FROM AGENT.PY) ---
 # Disable SSL Warnings
@@ -53,7 +55,7 @@ def ingest_maintenance_history(file_path):
     """
     
     if not os.path.exists(file_path):
-        print(f"Error: File not found at {file_path}")
+        logger.info(f"Error: File not found at {file_path}")
         return
 
     try:
@@ -61,15 +63,15 @@ def ingest_maintenance_history(file_path):
             data = json.load(f)
             
         assets = data.get("maintenance_dataset", {}).get("assets", [])
-        print(f"Found {len(assets)} assets to process...")
+        logger.info(f"Found {len(assets)} assets to process...")
 
         for asset in assets:
             process_asset(asset)
             
-        print("\n--- INGESTION COMPLETE ---")
+        logger.info("\n--- INGESTION COMPLETE ---")
         
     except Exception as e:
-        print(f"Critical Error during ingestion: {e}")
+        logger.info(f"Critical Error during ingestion: {e}")
 
 def process_asset(asset):
     """
@@ -91,9 +93,9 @@ def process_asset(asset):
     
     try:
         graph.query(machine_query, {"name": target_name})
-        print(f" > Found/Matched Machine: {target_name}")
+        logger.info(f" > Found/Matched Machine: {target_name}")
     except Exception as e:
-        print(f"Error matching machine {target_name}: {e}")
+        logger.info(f"Error matching machine {target_name}: {e}")
         return
 
     # 2. PROCESS INCIDENTS
@@ -132,9 +134,9 @@ def process_incident(machine_name, incident):
     
     try:
         graph.query(incident_query, params)
-        print(f"   - Linked Incident {incident.get('incident_id')} to {machine_name}")
+        logger.info(f"   - Linked Incident {incident.get('incident_id')} to {machine_name}")
     except Exception as e:
-        print(f"   ! Error linking incident {incident.get('incident_id')}: {e}")
+        logger.info(f"   ! Error linking incident {incident.get('incident_id')}: {e}")
         
 # --- 4. EXECUTION ---
 if __name__ == "__main__":

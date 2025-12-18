@@ -2,6 +2,8 @@ import json
 from typing import List, Dict, Optional, Any
 from langchain_neo4j import GraphCypherQAChain
 from langchain_core.prompts import PromptTemplate
+import logging
+logger = logging.getLogger("uvicorn")
 
 # Import singletons from agents.py
 from agent import llm, graph
@@ -31,7 +33,7 @@ class ManufacturingKGQueryEngine:
             result = self.chain.invoke({"query": natural_language_logic})
             return result.get('result', [])
         except Exception as e:
-            print(f"KG Engine Error: {e}")
+            logger.info(f"KG Engine Error: {e}")
             return []
 
     def find_qualified_technicians_for_workorder(self, workorder_id: str) -> List[Dict]:
