@@ -126,19 +126,19 @@ async def safe_analyze_image(image_bytes):
 
 @app.post("/api/simulation/log")
 async def simulate_log_event():
-    # Generate IDs and Timestamps
+    # ... (UUID and Time generation remains same) ...
     log_id = str(uuid.uuid4())[:8]
     work_order_id = f"WO-{log_id}"
     now = datetime.datetime.now()
     due = now + datetime.timedelta(hours=4) 
-    
     simulated_machine = "Robotic_Arm_KZ_200"
     
     # 1. Define the Work Order Data 
+    # NOTE: "Sensor Array B" triggers the missing part logic in agent.py
     wo_payload = {
         "id": work_order_id,
         "title": "Critical Overheat - Sensor Array B",
-        "description": "Temperature sensor detected persistent spike > 95°C. Immediate inspection required.",
+        "description": "Temperature sensor detected persistent spike > 95°C. Sensor Array B replacement likely required.",
         "type": "Emergency Repair",
         "priority": "Critical",
         "status": "open",
@@ -149,13 +149,8 @@ async def simulate_log_event():
         "machine_name": simulated_machine
     }
 
-    print(f"--- SIMULATION: Writing {work_order_id} to Graph ---")
-    
-    # 2. Write to Graph (This will now succeed)
+    # ... (Graph writing remains same) ...
     create_work_order_in_graph(wo_payload)
-
-    # 3. Wait for Neo4j consistency
-    print(" > Waiting for Graph consistency...")
     await asyncio.sleep(2) 
 
     try:
@@ -164,26 +159,41 @@ async def simulate_log_event():
         
         # 5. Parse Result into an Alert
         rec_tech = result.get("recommended_technician", {})
-        tech_name = rec_tech.get("name") if rec_tech else "Unassigned - Review Required"
+        
+        # CHECK FOR PURCHASE ORDER
+        purchase_order = result.get("purchase_order_id")
+        
+        if purchase_order:
+            tech_name = "Purchase Order Pending"
+            tech_role = "System"
+            alert_status = "Supply Chain Hold"
+            recommendation_text = f"Part Unavailable. {result.get('justification')}"
+        else:
+            tech_name = rec_tech.get("name") if rec_tech else "Unassigned"
+            tech_role = "Technician"
+            alert_status = "Open"
+            recommendation_text = result.get("justification", "Analysis complete.")
         
         new_alert = {
             "id": log_id,
             "work_order_id": work_order_id,
             "title": wo_payload["title"],
-            "status": "Open", 
+            "status": alert_status, 
             "severity": "Critical",
             "timestamp": now.strftime("%I:%M %p"),
             "machine": simulated_machine,
             "description": wo_payload["description"],
             "technician": tech_name,
-            "recommendation": result.get("justification", "Analysis complete.")
+            "technician_role": tech_role, # Added field
+            "purchase_order": purchase_order, # Added field
+            "recommendation": recommendation_text
         }
         
         GLOBAL_ALERTS.insert(0, new_alert)
         
         return {
             "status": "triggered", 
-            "message": f"WorkOrder created and analyzed.",
+            "message": f"WorkOrder analyzed. PO Generated: {purchase_order}",
             "alert": new_alert
         }
         

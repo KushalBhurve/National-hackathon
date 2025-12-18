@@ -262,22 +262,66 @@ const CompliancePage = () => {
                                         <div className="p-5 bg-gradient-to-br from-cyan-950/20 to-blue-950/20 rounded-xl border border-cyan-500/20 text-sm text-cyan-100 leading-relaxed shadow-inner">{selectedAlert.recommendation}</div>
                                     </div>
                                     {selectedAlert.technician && (
-                                        <div className="flex items-center gap-4 p-4 mt-4 bg-neutral-900 border border-neutral-800 rounded-xl relative overflow-hidden group">
-                                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
-                                            <div className="size-10 rounded-full bg-neutral-800 border border-neutral-700 flex items-center justify-center text-xs font-bold text-neutral-400">{selectedAlert.technician.substring(0,2).toUpperCase()}</div>
-                                            <div className="flex-1"><p className="text-sm font-bold text-white">{selectedAlert.technician}</p><p className="text-xs text-emerald-500 flex items-center gap-1"><span className="size-1.5 rounded-full bg-emerald-500 animate-pulse"></span>Technician Dispatched</p></div>
-                                            
-                                            {/* --- REASSIGN USER BUTTON --- */}
-                                            <button 
-                                                onClick={(e) => handleReassign(e, selectedAlert.id)}
-                                                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-neutral-800 border border-neutral-700 hover:border-neutral-600 hover:bg-neutral-700 text-neutral-400 hover:text-white transition-all text-xs font-bold z-10"
-                                                title="Assign Different Technician"
-                                            >
-                                                <span className="material-symbols-outlined text-sm">person_edit</span>
-                                                <span className="hidden sm:inline">Reassign</span>
-                                            </button>
-                                        </div>
-                                    )}
+    <div className="mt-4">
+        {selectedAlert.purchase_order ? (
+            /* --- PURCHASE ORDER CARD --- */
+            <div className="flex flex-col bg-neutral-900 border border-orange-500/30 rounded-xl relative overflow-hidden group">
+                <div className="absolute top-0 right-0 p-2 opacity-50"><span className="material-symbols-outlined text-6xl text-orange-500/10">shopping_cart</span></div>
+                
+                {/* Header */}
+                <div className="flex items-center gap-4 p-4 border-b border-neutral-800 bg-orange-500/5">
+                    <div className="size-10 rounded-full bg-neutral-800 border border-orange-500/50 flex items-center justify-center text-orange-500 animate-pulse">
+                        <span className="material-symbols-outlined text-xl">production_quantity_limits</span>
+                    </div>
+                    <div className="flex-1">
+                        <p className="text-sm font-bold text-white">Purchase Order Generated</p>
+                        <p className="text-xs text-orange-400 font-mono">{selectedAlert.purchase_order}</p>
+                    </div>
+                </div>
+
+                {/* Body */}
+                <div className="p-4 space-y-3">
+                    <div className="flex justify-between items-center text-xs">
+                        <span className="text-neutral-500">Missing Part</span>
+                        <span className="text-white font-bold">Sensor Array B</span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs">
+                        <span className="text-neutral-500">Est. Delivery</span>
+                        <span className="text-white font-mono">24 Hours (Expedited)</span>
+                    </div>
+                    <button className="w-full mt-2 py-2 bg-orange-500 hover:bg-orange-400 text-black text-xs font-bold rounded flex items-center justify-center gap-2 transition-all">
+                        <span className="material-symbols-outlined text-sm">open_in_new</span>
+                        View Vendor Details
+                    </button>
+                </div>
+            </div>
+        ) : (
+            /* --- STANDARD TECHNICIAN CARD --- */
+            <div className="flex items-center gap-4 p-4 bg-neutral-900 border border-neutral-800 rounded-xl relative overflow-hidden group">
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
+                <div className="size-10 rounded-full bg-neutral-800 border border-neutral-700 flex items-center justify-center text-xs font-bold text-neutral-400">
+                    {selectedAlert.technician.substring(0,2).toUpperCase()}
+                </div>
+                <div className="flex-1">
+                    <p className="text-sm font-bold text-white">{selectedAlert.technician}</p>
+                    <p className="text-xs text-emerald-500 flex items-center gap-1">
+                        <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        Technician Dispatched
+                    </p>
+                </div>
+                
+                <button 
+                    onClick={(e) => handleReassign(e, selectedAlert.id)}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg bg-neutral-800 border border-neutral-700 hover:border-neutral-600 hover:bg-neutral-700 text-neutral-400 hover:text-white transition-all text-xs font-bold z-10"
+                    title="Assign Different Technician"
+                >
+                    <span className="material-symbols-outlined text-sm">person_edit</span>
+                    <span className="hidden sm:inline">Reassign</span>
+                </button>
+            </div>
+        )}
+    </div>
+)}
                                 </div>
                             </div>
                         </div>
