@@ -4,7 +4,7 @@ import uuid
 from neo4j import GraphDatabase
 
 # --- CONFIGURATION ---
-JSON_FILE = r"C:\Users\GenAICHNSIRUSR19\PROJECT\Project\National-hackathon\backend\technician.json"
+JSON_FILE = r"C:\Users\GenAICHNSIRUSR20\Desktop\frontend\backend\technician.json"
 SQLITE_DB = "maintenance.db"
 NEO4J_URI = "neo4j://127.0.0.1:7687"
 NEO4J_AUTH = ("neo4j", "KulVishSuh")

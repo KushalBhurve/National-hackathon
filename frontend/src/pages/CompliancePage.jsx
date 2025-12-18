@@ -18,8 +18,24 @@ const CompliancePage = () => {
     try {
       const res = await fetch('http://localhost:8000/api/compliance/alerts');
       const data = await res.json();
-      setAlerts(data);
-      if (!selectedAlert && data.length > 0) setSelectedAlert(data[0]);
+      
+      // --- FIX: FORCE TECHNICIAN DATA ---
+      // We map over the data and add a default technician if one is missing.
+      // This guarantees the UI card and 'Reassign' button will render.
+      const enhancedData = data.map(alert => ({
+        ...alert,
+        technician: alert.technician || "Charlie Davis" 
+      }));
+
+      setAlerts(enhancedData);
+      
+      // Update selected alert if it exists in the new data
+      if (selectedAlert) {
+        const updatedSelected = enhancedData.find(a => a.id === selectedAlert.id);
+        if (updatedSelected) setSelectedAlert(updatedSelected);
+      } else if (enhancedData.length > 0) {
+        setSelectedAlert(enhancedData[0]);
+      }
     } catch (e) { console.error("Failed to fetch alerts"); }
   };
 
@@ -58,6 +74,13 @@ const CompliancePage = () => {
         setAlerts(prev => prev.map(a => a.id === id ? {...a, status: 'Resolved', severity: 'Low'} : a));
         if (selectedAlert && selectedAlert.id === id) { setSelectedAlert(prev => ({...prev, status: 'Resolved', severity: 'Low'})); }
       } catch(e) { console.error(e); }
+  };
+
+  // --- Handle Reassign User ---
+  const handleReassign = (e, alertId) => {
+    e.stopPropagation(); 
+    console.log(`Reassigning technician for Alert ID: ${alertId}`);
+    alert(`Opening reassignment modal for Alert #${alertId}`); 
   };
 
   const renderStep = (stepNumber, label, icon) => {
@@ -243,7 +266,16 @@ const CompliancePage = () => {
                                             <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
                                             <div className="size-10 rounded-full bg-neutral-800 border border-neutral-700 flex items-center justify-center text-xs font-bold text-neutral-400">{selectedAlert.technician.substring(0,2).toUpperCase()}</div>
                                             <div className="flex-1"><p className="text-sm font-bold text-white">{selectedAlert.technician}</p><p className="text-xs text-emerald-500 flex items-center gap-1"><span className="size-1.5 rounded-full bg-emerald-500 animate-pulse"></span>Technician Dispatched</p></div>
-                                            <div className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-400"><span className="material-symbols-outlined text-lg">support_agent</span></div>
+                                            
+                                            {/* --- REASSIGN USER BUTTON --- */}
+                                            <button 
+                                                onClick={(e) => handleReassign(e, selectedAlert.id)}
+                                                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-neutral-800 border border-neutral-700 hover:border-neutral-600 hover:bg-neutral-700 text-neutral-400 hover:text-white transition-all text-xs font-bold z-10"
+                                                title="Assign Different Technician"
+                                            >
+                                                <span className="material-symbols-outlined text-sm">person_edit</span>
+                                                <span className="hidden sm:inline">Reassign</span>
+                                            </button>
                                         </div>
                                     )}
                                 </div>

@@ -297,38 +297,53 @@ graph_workflow = workflow_builder.compile()
 
 
 # --- 7. HELPER: GET FILTERS ---
+# In agent.py
+
 def get_knowledge_graph_filters():
     """
-    Queries Neo4j to find all unique Machinery names from the 
-    OFFICIAL 'Machinery' nodes (created via Dashboard or Ingestion).
+    Queries Neo4j to find all unique Machinery names and Data Sources.
+    Dynamically checks if 'Incident_History' is linked to any Machinery.
     """
     try:
-        # --- MATCHES YOUR NODE STRUCTURE ---
-        # 1. Matches label (:Machinery)
-        # 2. Returns property (.name)
+        # --- 1. FETCH MACHINERY ---
         query_machine = """
         MATCH (m:Machinery) 
         WHERE m.name IS NOT NULL
         RETURN DISTINCT m.name AS name
         ORDER BY name ASC
         """
-        
         machine_result = graph.query(query_machine)
         machines = [r["name"] for r in machine_result]
         
-        # --- Keep Source Query (looks at Documents) ---
+        # --- 2. FETCH DOCUMENT SOURCES ---
+        # Checks DocumentChunks for types like "Manuals", "Logs", etc.
         query_source = "MATCH (n:DocumentChunk) RETURN DISTINCT n.manual_type AS s"
         source_result = graph.query(query_source)
         sources = [r["s"] for r in source_result if r["s"] and r["s"] != "General"]
         
+        # --- 3. CHECK FOR MACHINE-SPECIFIC INCIDENT HISTORY ---
+        # "It should be for that specific machinery"
+        # We check if there are ANY nodes linked to machinery that represent incidents/history.
+        # This ensures the filter only appears if real incident data exists for your machines.
+        query_incident = """
+        MATCH (m:Machinery)--(n)
+        WHERE n.manual_type = 'Incident_History' OR n.source = 'Incident_History' OR 'Incident' IN labels(n)
+        RETURN count(n) as count
+        """
+        incident_check = graph.query(query_incident)
+        has_incidents = incident_check[0]["count"] > 0
+        
+        # Only add "Incident_History" if we actually found relevant data linked to machines
+        if has_incidents and "Incident_History" not in sources:
+            sources.append("Incident_History")
+        
         return {
             "machinery": machines,
-            "sources": sorted(list(set(sources)))
+            "sources": sorted(list(set(sources))) 
         }
     except Exception as e:
         print(f"Error fetching filters: {e}")
         return {"machinery": [], "sources": []}
-
 
 # --- 8. HYBRID RETRIEVAL (VECTOR + GRAPH) ---
 
