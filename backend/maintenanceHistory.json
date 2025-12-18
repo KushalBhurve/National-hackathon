@@ -1,0 +1,142 @@
+{
+  "maintenance_dataset": {
+    "description": "Synthetic maintenance history for testing Enterprise Context Retention agents. Includes technician logs designed to conflict with established manual specifications.",
+    "assets": [
+      {
+        "asset_id": "R2000iB-210F-001",
+        "model": "FANUC R-2000iB/210F",
+        "application": "Spot Welding",
+        "manual_reference": "R-2000iB(E)_v08.pdf",
+        "specifications": {
+          "type": "Articulated",
+          "max_payload_wrist": "210kg",
+          "max_load_j2_base": "550kg",
+          "max_load_j3_arm": "25kg",
+          "reach": "2655mm"
+        },
+        "incidents": [
+          {
+            "date": "2024-10-12",
+            "incident_id": "INC-4001",
+            "component": "J2 Axis",
+            "reported_issue": "Excessive Vibration",
+            "technician_notes": "Operator reported shuddering during the lift cycle. We tightened the base bolts. Suspect overload, but line manager insists the 560kg fixture on the J2 base is fine.",
+            "agent_verification_context": "VIOLATION: Manual [cite: 46] states Max load capacity at J2 base is 550kg. The agent should flag this overload."
+          },
+          {
+            "date": "2024-11-05",
+            "incident_id": "INC-4005",
+            "component": "Controller",
+            "reported_issue": "E-Stop Triggered",
+            "technician_notes": "Robot halted during the morning shift. The humidity sensor in the cell read 97% due to a steam leak nearby. Dried the unit and restarted.",
+            "agent_verification_context": "VIOLATION: Installation environment [cite: 46] requires Max 95% RH (short term) and no dew."
+          },
+          {
+            "date": "2024-12-01",
+            "incident_id": "INC-4022",
+            "component": "J5 Axis",
+            "reported_issue": "Drift in accuracy",
+            "technician_notes": "Re-calibrated J5. Note: The spot welding gun mounted is heavy. Adjusted motion range to prevent rear interference.",
+            "agent_verification_context": "CONTEXT: Verify J5 motion range is within limits (e.g., -120 to +120 degrees) [cite: 46] and check against rear interference area diagrams[cite: 40]."
+          }
+        ]
+      },
+      {
+        "asset_id": "M900iB-700-002",
+        "model": "FANUC M-900iB/700",
+        "application": "Aircraft Riveting",
+        "manual_reference": "RM-900iB(E)-09.pdf",
+        "specifications": {
+          "type": "Heavy Payload",
+          "max_payload_wrist": "700kg",
+          "max_load_j3_arm": "25kg",
+          "ip_rating": "IP67 equivalent (wrist)"
+        },
+        "incidents": [
+          {
+            "date": "2025-01-10",
+            "incident_id": "INC-5099",
+            "component": "J3 Arm",
+            "reported_issue": "Structural Crack",
+            "technician_notes": "Found hairline fracture on J3 casing. The team mounted a secondary controller weighing 35kg directly onto the J3 arm for easier access.",
+            "agent_verification_context": "VIOLATION: Manual [cite: 462] states Max load capacity at J3 arm is 25kg. The agent must detect this unauthorized modification."
+          },
+          {
+            "date": "2025-01-15",
+            "incident_id": "INC-5102",
+            "component": "Wrist Unit",
+            "reported_issue": "Positioning Error",
+            "technician_notes": "Robot struggling to hold position during riveting. Payload is exactly 700kg, but the center of gravity seems off. Adjusted servo gains.",
+            "agent_verification_context": "RULE CHECK: Confirm payload is within 700kg[cite: 449]. Agent should check if Center of Gravity (CoG) data aligns with allowable load moment/inertia specs[cite: 457, 471]."
+          },
+          {
+            "date": "2025-02-20",
+            "incident_id": "INC-5201",
+            "component": "General",
+            "reported_issue": "Water Damage",
+            "technician_notes": "Washdown crew sprayed the wrist directly. Unit is IP67 equivalent, so it should be fine, but seals look worn.",
+            "agent_verification_context": "CONTEXT: Manual confirms wrist durability is equivalent to IP67 (dust/drip-proof)[cite: 375]. Agent should validate if 'high pressure washdown' exceeds 'drip-proof' context."
+          }
+        ]
+      },
+      {
+        "asset_id": "R1000iA-80H-003",
+        "model": "FANUC R-1000iA/80H",
+        "application": "High-Speed Palletizing",
+        "manual_reference": "RR-1000iA(E)-07b.pdf",
+        "specifications": {
+          "type": "5 axes type",
+          "max_payload_wrist": "80kg",
+          "j1_axis_speed": "185 deg/s"
+        },
+        "incidents": [
+          {
+            "date": "2025-03-01",
+            "incident_id": "INC-6001",
+            "component": "J6 Axis",
+            "reported_issue": "Axis not found error",
+            "technician_notes": "Software error looking for J6 feedback. We don't have a J6, but the new intern tried to force a 6-axis path program onto it.",
+            "agent_verification_context": "CONTEXT: The R-1000iA/80H is explicitly a 5-axis type robot[cite: 796]. The agent should flag the program compatibility issue."
+          },
+          {
+            "date": "2025-03-05",
+            "incident_id": "INC-6004",
+            "component": "J1 Axis",
+            "reported_issue": "Overheat",
+            "technician_notes": "Running at 100% duty cycle. Speed set to 190 deg/s on J1 to meet throughput targets. Motor thermal trip.",
+            "agent_verification_context": "VIOLATION: Max speed for J1 axis on the 80H model is 185 deg/s[cite: 796]. The agent must catch this parameter violation."
+          }
+        ]
+      },
+      {
+        "asset_id": "R2000iC-125L-004",
+        "model": "FANUC R-2000iC/125L",
+        "application": "Long Reach Handling",
+        "manual_reference": "RR-2000iC(E)-06.pdf",
+        "specifications": {
+          "type": "Long Reach",
+          "reach": "3100mm",
+          "max_payload_wrist": "125kg"
+        },
+        "incidents": [
+          {
+            "date": "2025-04-12",
+            "incident_id": "INC-7044",
+            "component": "J3 Arm",
+            "reported_issue": "Interference / Collision",
+            "technician_notes": "Robot arm clipped the safety fence during full extension. We thought we had 3.5m clearance, but the reach seems longer than the old B-series.",
+            "agent_verification_context": "CONTEXT: Verify Reach. The R-2000iC/125L has a reach of 3100mm[cite: 976]. Agent should confirm if the cell design accounted for the full operating space[cite: 962]."
+          },
+          {
+            "date": "2025-04-14",
+            "incident_id": "INC-7050",
+            "component": "J4 Axis",
+            "reported_issue": "Servo Lag",
+            "technician_notes": "J4 lagging during heavy wrist rotation. Wrist payload is 120kg. Replaced servo amp.",
+            "agent_verification_context": "RULE CHECK: Max load capacity at wrist is 125kg[cite: 976]. Operation is within limits, suggesting genuine hardware failure rather than usage violation."
+          }
+        ]
+      }
+    ]
+  }
+}

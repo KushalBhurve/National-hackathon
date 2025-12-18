@@ -14,33 +14,19 @@ from kg_engine import ManufacturingKGQueryEngine
 
 # UPDATED PROMPT: Removed Facility Context
 WORK_ORDER_ASSIGNMENT_PROMPT = ChatPromptTemplate.from_template("""
-You are a FactoryOS Intelligent Resource Manager.
-Your task is to assign a qualified technician to a critical Work Order.
+You are a FactoryOS Resource Manager. 
+Based on the data below, select exactly ONE technician name.
 
-WORK ORDER DETAILS:
-ID: {work_order_id}
-Title: {work_order_title}
-Description: {work_order_description}
-
-EQUIPMENT CONTEXT:
-Name: {equipment_name}
-Type: {equipment_type}
-
-CANDIDATE POOL (Global):
-{qualified_technicians}
-
-CONSTRAINTS:
-Consider Current Workload: {consider_workload}
+WORK ORDER: {work_order_title}
+EQUIPMENT: {equipment_name}
+CANDIDATES: {qualified_technicians}
 
 INSTRUCTIONS:
-1. Analyze the technical requirements of the machine type.
-2. Evaluate candidates based on certification level, current status, and role.
-3. If 'consider_workload' is True, prioritize 'Available' or 'Idle' candidates.
-4. Select the BEST candidate.
-5. Provide a rigorous justification.
+- Respond with the data regarding the technician, like name,certification, etc.
+- Do not include reasoning, headers, or any other text.
+- If multiple are qualified, pick the first one.
 
-Output your reasoning steps clearly.
-""")
+NAME:""")
 
 logger = logging.getLogger(__name__)
 

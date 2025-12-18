@@ -4,10 +4,10 @@ import uuid
 from neo4j import GraphDatabase
 
 # --- CONFIGURATION ---
-JSON_FILE = "technician.json"
+JSON_FILE = r"C:\Users\GenAICHNSIRUSR19\PROJECT\Project\National-hackathon\backend\technician.json"
 SQLITE_DB = "maintenance.db"
 NEO4J_URI = "neo4j://127.0.0.1:7687"
-NEO4J_AUTH = ("neo4j", "Rag1234##")
+NEO4J_AUTH = ("neo4j", "KulVishSuh")
 
 # --- 1. SAVE DATA TO JSON ---
 def save_to_json(data, filename=JSON_FILE):

@@ -39,20 +39,19 @@ class ManufacturingKGQueryEngine:
         UPDATED: Explicitly guides LLM to use the correct 'required_skills' property match.
         """
         logic_prompt = f"""
-        I need to find qualified technicians for WorkOrder ID '{workorder_id}'.
-        
-        The Graph Schema is:
-        (:WorkOrder)-[:TARGETS_EQUIPMENT]->(:Machinery)
-        (:Technician) nodes exist globally.
-        
-        Generate a Cypher query to:
-        1. Match the WorkOrder node by id '{workorder_id}'.
-        2. Match ALL nodes labeled 'Technician'.
-        3. FILTER: The Technician's 'certification_level' MUST be present in the WorkOrder's 'required_skills' list.
-           (Hint: Use 'WHERE t.certification_level IN w.required_skills')
-        4. FILTER: The Technician's status must be 'Available'.
-        5. Return the Technician's id, name, role, certification_level, and status.
-        """
+    I need to find qualified technicians for WorkOrder ID '{workorder_id}'.
+    
+    The Graph Schema is:
+    (:WorkOrder)-[:TARGETS_EQUIPMENT]->(:Machinery)
+    (:Technician) nodes exist globally.
+    
+    Generate a Cypher query to:
+    1. Match the WorkOrder node by id '{workorder_id}'.
+    2. Match ALL nodes labeled 'Technician'.
+    3. FILTER: The Technician's 'certification_level' MUST be present in the WorkOrder's 'required_skills' list.
+    4. FILTER: The Technician's status must be 'Active'.  <-- CHANGE THIS FROM 'Available'
+    5. Return the Technician's id, name, role, certification_level, and status.
+    """
         return self._execute_dynamic_query(logic_prompt)
 
     def get_workorder_context(self, workorder_id: str) -> Dict:

@@ -141,7 +141,6 @@ async def simulate_log_event():
         "type": "Emergency Repair",
         "priority": "Critical",
         "status": "open",
-        # Ensure 'L3' is in this list to match Arjun's 'L3' cert level
         "required_skills": ["Robotics", "L3"], 
         "estimated_hours": 4,
         "created_at": now.isoformat(),
