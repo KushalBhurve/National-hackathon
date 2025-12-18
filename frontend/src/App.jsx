@@ -1,41 +1,37 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import HomePage from './pages/HomePage';
-import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/Dashboard';
-import CompliancePage from './pages/CompliancePage';
-import ChatbotPage from './pages/ChatBotPage';
-// --- NEW IMPORT ---
+import SystemArchitecture from './pages/SystemArchitecture';
+// Assuming you have an Agent page for the actual Chat interface
+import AgentChatPage from './pages/ChatBotPage'; 
 import ResourceManagementPage from './pages/ResourceManagementPage';
+import CompliancePage from './pages/CompliancePage';
 
-function App() {
+const App = () => {
   return (
     <Router>
       <Routes>
-        {/* 1. Default Route: Shows the Landing Page */}
-        <Route path="/" element={<HomePage />} />
-        
-        {/* 2. Login Route */}
-        <Route path="/login" element={<LoginPage />} />
-        
-        {/* 3. Dashboard Route (Protected Area) */}
+        {/* Default Route: Redirect to Dashboard or Login */}
+        <Route path="/" element={<Navigate to="/dashboard" />} />
+
+        {/* The main Data Source management page */}
         <Route path="/dashboard" element={<DashboardPage />} />
-        
-        {/* 4. Compliance Route */}
-        <Route path="/compliance" element={<CompliancePage />} />
 
-        {/* 5. Agent/Chatbot Route */}
-        <Route path="/agent" element={<ChatbotPage />} />
+        {/* The NEW Technical Flow/Architecture page you requested */}
+        <Route path="/system-flow" element={<SystemArchitecture />} />
 
-        {/* 6. NEW: Resource Management Route */}
-        <Route path="/resources" element={<ResourceManagementPage />} />
+        {/* The actual AI Agent interface for Hybrid RAG queries */}
+        <Route path="/agent" element={<AgentChatPage />} />
 
-        {/* Catch-all: Redirect unknown URLs back to Home */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {/* Placeholder routes for other Sidebar items */}
+        <Route path="/resources" element={<ResourceManagementPage/>} />
+        <Route path="/compliance" element={<CompliancePage/>} />
 
+        {/* Fallback Catch-all */}
+        <Route path="*" element={<Navigate to="/dashboard" />} />
       </Routes>
     </Router>
   );
-}
+};
 
 export default App;

@@ -21,6 +21,7 @@ from data import DATA_SOURCES, STATS
 import fitz  # PyMuPDF
 from agent import graph_workflow, process_chat_query, get_knowledge_graph_filters, add_technician_to_graph, add_task_to_graph, add_machine_to_graph, graph
 from work_order_agent import WorkOrderAssignmentAgent
+from pydantic import BaseModel
 
 app = FastAPI(title="FactoryOS Backend")
 
@@ -35,7 +36,17 @@ app.add_middleware(
 GLOBAL_ALERTS = []
 # Initialize Agent Runner Globally
 agent_runner = WorkOrderAssignmentAgent()
-
+class WorkOrderDetail(BaseModel):
+    id: str
+    title: str
+    description: str
+    status: str
+    priority: str
+    type: str
+    due_date: str
+    required_skills: List[str]
+    target_machine: str = "Unknown"
+    assigned_technician: str = "Unassigned"
 @app.get("/")
 async def root():
     return {"message": "FactoryOS Backend is running"}
@@ -299,6 +310,44 @@ async def create_task(task: TaskInput):
 async def create_machine(machine: MachineInput):
     add_machine_to_graph(machine.dict())
     return {"status": "success"}
+
+@app.get("/api/workorder/{work_order_id}", response_model=WorkOrderDetail)
+async def get_work_order_details(work_order_id: str):
+    """
+    Fetches live WorkOrder node details directly from Neo4j.
+    """
+    query = """
+    MATCH (w:WorkOrder {id: $wo_id})
+    OPTIONAL MATCH (w)-[:TARGETS_EQUIPMENT]->(m)
+    OPTIONAL MATCH (t:Technician)-[:ASSIGNED_TO]->(w)
+    RETURN w, m.name as machine, t.name as technician
+    """
+    
+    try:
+        results = graph.query(query, {"wo_id": work_order_id})
+        
+        if not results:
+            raise HTTPException(status_code=404, detail="Work Order not found in Graph")
+            
+        record = results[0]
+        node = record['w']
+        
+        return {
+            "id": node.get('id'),
+            "title": node.get('title'),
+            "description": node.get('description'),
+            "status": node.get('status'),
+            "priority": node.get('priority'),
+            "type": node.get('type'),
+            "due_date": node.get('due_date'),
+            # Handle Neo4j list or fallback
+            "required_skills": node.get('required_skills') if isinstance(node.get('required_skills'), list) else [],
+            "target_machine": record.get('machine') or "Unknown",
+            "assigned_technician": record.get('technician') or "Unassigned"
+        }
+    except Exception as e:
+        print(f"Graph Fetch Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
