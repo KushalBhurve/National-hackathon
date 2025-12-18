@@ -4,7 +4,7 @@
     "assets": [
       {
         "asset_id": "R2000iB-210F-001",
-        "model": "FANUC R-2000iB/210F",
+        "machinery": "Fanuc R-2000iB",
         "application": "Spot Welding",
         "manual_reference": "R-2000iB(E)_v08.pdf",
         "specifications": {
@@ -43,7 +43,7 @@
       },
       {
         "asset_id": "M900iB-700-002",
-        "model": "FANUC M-900iB/700",
+        "machinery": "Fanuc M-900iB",
         "application": "Aircraft Riveting",
         "manual_reference": "RM-900iB(E)-09.pdf",
         "specifications": {
@@ -81,7 +81,7 @@
       },
       {
         "asset_id": "R1000iA-80H-003",
-        "model": "FANUC R-1000iA/80H",
+        "machinery": "Fanuc R-1000iA",
         "application": "High-Speed Palletizing",
         "manual_reference": "RR-1000iA(E)-07b.pdf",
         "specifications": {
@@ -104,13 +104,13 @@
             "component": "J1 Axis",
             "reported_issue": "Overheat",
             "technician_notes": "Running at 100% duty cycle. Speed set to 190 deg/s on J1 to meet throughput targets. Motor thermal trip.",
-            "agent_verification_context": "VIOLATION: Max speed for J1 axis on the 80H model is 185 deg/s[cite: 796]. The agent must catch this parameter violation."
+            "agent_verification_context": "VIOLATION: Max speed for J1 axis on the 80H machinery is 185 deg/s[cite: 796]. The agent must catch this parameter violation."
           }
         ]
       },
       {
         "asset_id": "R2000iC-125L-004",
-        "model": "FANUC R-2000iC/125L",
+        "machinery": "Fanuc R-2000iC",
         "application": "Long Reach Handling",
         "manual_reference": "RR-2000iC(E)-06.pdf",
         "specifications": {
