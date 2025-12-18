@@ -39,8 +39,6 @@ const DashboardPage = () => {
   const [uploadStatus, setUploadStatus] = useState(null);
 
   // --- FETCH DATA ---
-// --- FETCH DATA ---
-  // --- FETCH DATA ---
   const fetchDashboardData = async () => {
     try {
         // 1. Fetch Filters
@@ -53,15 +51,18 @@ const DashboardPage = () => {
         const resStats = await fetch('http://localhost:8000/api/dashboard/stats');
         const dataStats = await resStats.json();
         
-        // --- FIX IS HERE: Match keys to your Backend JSON ---
         setDashboardStats({
-            active_nodes: dataStats.active_nodes || 0,          // Matches JSON: "active_nodes"
-            uptime: dataStats.uptime || "99.9%",                // Matches JSON: "uptime"
-            manuals_processed: dataStats.manuals_processed || 0,// Matches JSON: "manuals_processed"
-            vector_speed: dataStats.vector_speed || 0           // Matches JSON: "vector_speed"
+            active_nodes: dataStats.active_nodes || 0,
+            uptime: dataStats.uptime || "99.9%",
+            manuals_processed: dataStats.manuals_processed || 0,
+            vector_speed: dataStats.vector_speed || 0
         });
         
-        setDataSources(dataStats.data_sources || []); // Matches JSON: "data_sources"
+        // --- MODIFIED SECTION: MERGE API DATA WITH HARDCODED FIELDS ---
+        const apiSources = dataStats.data_sources || [];
+        const hardcodedSources = ["Maintenance History", "Technician Data"];
+        setDataSources([...apiSources, ...hardcodedSources]); 
+        // -------------------------------------------------------------
 
         // 3. Fetch Full Graph Visualization
         const resGraph = await fetch('http://localhost:8000/api/graph/visualize');
@@ -236,7 +237,7 @@ const DashboardPage = () => {
               { label: 'Manuals', val: dashboardStats.manuals_processed, icon: 'menu_book', color: 'text-purple-400' },
               { label: 'Knowledge Triples', val: dashboardStats.vector_speed, unit: '', icon: 'speed', color: 'text-amber-400' }
             ].map((stat, i) => (
-                    <motion.div key={i} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.1 }} className="glass-panel p-6 rounded-2xl group hover:border-neutral-700 transition-colors">
+                  <motion.div key={i} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.1 }} className="glass-panel p-6 rounded-2xl group hover:border-neutral-700 transition-colors">
                   <div className="flex justify-between items-start mb-4">
                       <div className={`p-2 rounded-lg bg-neutral-800/50 ${stat.color} border border-white/5`}><span className="material-symbols-outlined">{stat.icon}</span></div>
                   </div>
@@ -305,7 +306,10 @@ const DashboardPage = () => {
                                 <div key={index} className="flex items-center gap-3 p-3 rounded-xl bg-neutral-800/40 border border-white/5 hover:bg-neutral-800 transition-colors cursor-default group">
                                     <div className="w-8 h-8 rounded-full bg-purple-500/10 flex items-center justify-center text-purple-400 group-hover:scale-110 transition-transform">
                                         <span className="material-symbols-outlined text-sm">
-                                            {source.includes('Manual') ? 'menu_book' : source.includes('User') ? 'person' : 'description'}
+                                            {/* Updated icon logic to support Technician and History */}
+                                            {source.includes('Manual') ? 'menu_book' : 
+                                             (source.includes('User') || source.includes('Technician')) ? 'person' : 
+                                             source.includes('History') ? 'history' : 'description'}
                                         </span>
                                     </div>
                                     <div>

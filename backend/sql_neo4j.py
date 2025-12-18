@@ -6,10 +6,10 @@ import logging
 logger = logging.getLogger("uvicorn")
 
 # --- CONFIGURATION ---
-JSON_FILE = r"C:\Users\GenAICHNSIRUSR20\Desktop\frontend\backend\technician.json"
+JSON_FILE = r"C:\Users\GenAICHNSIRUSR14\Desktop\NHACK\National-hackathon\backend\technician.json"
 SQLITE_DB = "maintenance.db"
 NEO4J_URI = "neo4j://127.0.0.1:7687"
-NEO4J_AUTH = ("neo4j", "KulVishSuh")
+NEO4J_AUTH = ("neo4j", "qwertyuiop")
 
 # --- 1. SAVE DATA TO JSON ---
 def save_to_json(data, filename=JSON_FILE):

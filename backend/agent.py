@@ -55,8 +55,7 @@ load_dotenv()
 # Neo4j Config
 NEO4J_URI = "bolt://localhost:7687"
 NEO4J_USERNAME = "neo4j"
-NEO4J_PASSWORD = "KulVishSuh" 
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+NEO4J_PASSWORD = "qwertyuiop" 
 
 # ChromaDB Config
 CHROMA_PATH = "./chroma_db_store"

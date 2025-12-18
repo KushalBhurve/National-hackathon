@@ -1,6 +1,7 @@
 import json
 import os
 import ssl
+import traceback
 import requests
 import warnings
 import hashlib
@@ -37,10 +38,10 @@ load_dotenv()
 # Neo4j Config (Matches your agent.py)
 NEO4J_URI = "bolt://localhost:7687"
 NEO4J_USERNAME = "neo4j"
-NEO4J_PASSWORD = "KulVishSuh" 
+NEO4J_PASSWORD = "qwertyuiop" 
 
 # Path to your JSON file
-JSON_FILE_PATH = r"C:\Users\GenAICHNSIRUSR19\PROJECT\Project\National-hackathon\backend\maintenanceHistory.json"
+JSON_FILE_PATH = r"C:\Users\GenAICHNSIRUSR14\Desktop\NHACK\National-hackathon\backend\maintenanceHistory.json"
 
 # Initialize Graph Connection
 graph = Neo4jGraph(url=NEO4J_URI, username=NEO4J_USERNAME, password=NEO4J_PASSWORD)
