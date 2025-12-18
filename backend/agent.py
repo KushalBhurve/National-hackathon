@@ -637,7 +637,7 @@ def add_task_to_graph(task: dict):
         "priority": task["priority"],
         "target_machine": task["target_machine"] # Exact string from frontend dropdown
     }
-    
+
     try:
         graph.query(query, params)
         print(f" > SUCCESS: Task '{task['title']}' linked to Machine '{task['target_machine']}'")
@@ -645,3 +645,31 @@ def add_task_to_graph(task: dict):
     except Exception as e:
         print(f"Error adding task: {e}")
         return False
+
+def get_graph_statistics():
+    stats = { "active_nodes": 0, "manuals_ingested": 0, "total_triples": 0, "data_sources": [] }
+    
+    try:
+        # FIX: Count ALL nodes, not just Machinery
+        # This will match the "326" you see in Neo4j Desktop
+        q_nodes = "MATCH (n) RETURN count(n) as count" 
+        stats["active_nodes"] = graph.query(q_nodes)[0]["count"]
+
+        # Count Unique Manuals
+        q_manuals = "MATCH (d:DocumentChunk) RETURN count(distinct d.doc_id) as count"
+        stats["manuals_ingested"] = graph.query(q_manuals)[0]["count"]
+
+        # Get Data Sources
+        q_sources = "MATCH (n:DocumentChunk) RETURN DISTINCT n.manual_type as source"
+        source_res = graph.query(q_sources)
+        stats["data_sources"] = [r["source"] for r in source_res if r["source"]]
+
+        # Count Relationships
+        q_rels = "MATCH ()-[r]->() RETURN count(r) as count"
+        stats["total_triples"] = graph.query(q_rels)[0]["count"]
+        
+    except Exception as e:
+        print(f"Error fetching stats: {e}")
+    
+    print(stats)
+    return stats

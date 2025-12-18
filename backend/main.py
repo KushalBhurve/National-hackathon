@@ -19,9 +19,10 @@ from models import (
 )
 from data import DATA_SOURCES, STATS
 import fitz  # PyMuPDF
-from agent import graph_workflow, process_chat_query, get_knowledge_graph_filters, add_technician_to_graph, add_task_to_graph, add_machine_to_graph, graph
+from agent import graph_workflow, process_chat_query, get_knowledge_graph_filters, add_technician_to_graph, add_task_to_graph, add_machine_to_graph, graph, get_graph_statistics
 from work_order_agent import WorkOrderAssignmentAgent
 from pydantic import BaseModel
+
 
 app = FastAPI(title="FactoryOS Backend")
 
@@ -51,9 +52,9 @@ class WorkOrderDetail(BaseModel):
 async def root():
     return {"message": "FactoryOS Backend is running"}
 
-@app.get("/api/dashboard/stats", response_model=DashboardStats)
-async def get_dashboard_stats():
-    return STATS
+# @app.get("/api/dashboard/stats", response_model=DashboardStats)
+# async def get_dashboard_stats():
+#     return STATS
 
 @app.get("/api/dashboard/sources", response_model=List[DataSource])
 async def get_data_sources():
@@ -196,6 +197,20 @@ async def simulate_log_event():
 async def get_compliance_alerts():
     return GLOBAL_ALERTS
 
+@app.get("/api/dashboard/stats")
+async def get_dashboard_stats():
+    # Fetch real data from Neo4j
+    graph_data = get_graph_statistics()
+    
+    # CRITICAL: Map the database keys to the Frontend keys
+    return {
+        "active_nodes": graph_data.get("active_nodes", 0),
+        "uptime": "99.9%",  # Hardcoded or fetched from logs
+        "manuals_processed": graph_data.get("manuals_ingested", 0), # Map 'ingested' -> 'processed'
+        "vector_speed": graph_data.get("total_triples", 0),         # Map 'triples' -> 'speed'
+        "data_sources": graph_data.get("data_sources", [])
+    }
+
 @app.post("/api/compliance/resolve/{alert_id}")
 async def resolve_alert(alert_id: str):
     for alert in GLOBAL_ALERTS:
@@ -309,6 +324,86 @@ async def create_task(task: TaskInput):
 async def create_machine(machine: MachineInput):
     add_machine_to_graph(machine.dict())
     return {"status": "success"}
+
+@app.get("/api/graph/visualize")
+async def get_full_graph_visualization():
+    """
+    Fetches the graph structure using explicit Cypher returns to avoid
+    'dict object has no attribute labels' errors.
+    """
+    # We explicitly select ID, Labels, and Name/Title to ensure we get them
+    query = """
+    MATCH (n)-[r]->(m)
+    RETURN 
+        elementId(n) AS source_id,
+        labels(n) AS source_labels,
+        coalesce(n.name, n.title, n.description, "Unknown Node") AS source_name,
+        
+        type(r) AS rel_type,
+        
+        elementId(m) AS target_id,
+        labels(m) AS target_labels,
+        coalesce(m.name, m.title, m.description, "Unknown Node") AS target_name
+    LIMIT 300
+    """
+    
+    try:
+        results = graph.query(query)
+        
+        nodes = {}
+        links = []
+        
+        for record in results:
+            # --- 1. Process Source Node ---
+            s_id = record['source_id']
+            if s_id not in nodes:
+                lbls = record['source_labels']
+                nodes[s_id] = {
+                    "id": s_id,
+                    "name": record['source_name'][:20], # Truncate long names
+                    "label": lbls[0] if lbls else "Node",
+                    "color": get_color_for_labels(lbls),
+                    "val": 5 if "Machinery" in lbls else 3
+                }
+
+            # --- 2. Process Target Node ---
+            t_id = record['target_id']
+            if t_id not in nodes:
+                lbls = record['target_labels']
+                nodes[t_id] = {
+                    "id": t_id,
+                    "name": record['target_name'][:20],
+                    "label": lbls[0] if lbls else "Node",
+                    "color": get_color_for_labels(lbls),
+                    "val": 5 if "Machinery" in lbls else 3
+                }
+
+            # --- 3. Add Link ---
+            links.append({
+                "source": s_id,
+                "target": t_id,
+                "type": record['rel_type']
+            })
+            
+        return {
+            "nodes": list(nodes.values()),
+            "links": links
+        }
+        
+    except Exception as e:
+        print(f"Visualization Error: {e}")
+        # traceback.print_exc() # Uncomment to see full error in terminal
+        return {"nodes": [], "links": []}
+
+# --- Helper Function for Colors ---
+def get_color_for_labels(labels):
+    if "Machinery" in labels: return "#22d3ee"      # Cyan
+    if "Technician" in labels: return "#a78bfa"     # Purple
+    if "Task" in labels: return "#facc15"           # Yellow
+    if "WorkOrder" in labels: return "#f87171"      # Red
+    if "DocumentChunk" in labels: return "#34d399"  # Emerald
+    return "#888888" # Default Gray
+
 
 @app.get("/api/workorder/{work_order_id}", response_model=WorkOrderDetail)
 async def get_work_order_details(work_order_id: str):
