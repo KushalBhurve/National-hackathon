@@ -6,6 +6,11 @@ import datetime
 import json
 import asyncio 
 from dotenv import load_dotenv
+import base64
+from agent import llm  # Import your configured LLM
+from langchain_core.messages import HumanMessage
+import traceback
+import asyncio # You likely already have this
 
 load_dotenv()
 from models import (
@@ -79,6 +84,33 @@ def create_work_order_in_graph(wo_data: dict):
         return False
 
 # --- Simulation & Agent Trigger Endpoint ---
+
+async def analyze_image_with_gpt4o(image_bytes):
+    # Encode image to base64
+    base64_image = base64.b64encode(image_bytes).decode('utf-8')
+    
+    # Create the payload for GPT-4o
+    message = HumanMessage(
+        content=[
+            {"type": "text", "text": "Describe this technical diagram or machine part in extreme detail for a search index."},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+        ]
+    )
+    
+    # Invoke the model (using the LLM imported from agent.py)
+    response = await llm.ainvoke([message])
+    return f"\n[IMAGE DESCRIPTION]: {response.content}\n"
+
+# Limit concurrent image analysis to 5 at a time to avoid Rate Limits
+image_semaphore = asyncio.Semaphore(5)
+
+async def safe_analyze_image(image_bytes):
+    async with image_semaphore:
+        try:
+            return await analyze_image_with_gpt4o(image_bytes)
+        except Exception as e:
+            print(f"Image analysis failed: {e}")
+            return "" # Return empty string on failure so process continues
 
 @app.post("/api/simulation/log")
 async def simulate_log_event():
@@ -169,24 +201,80 @@ async def ingest_data(
     machinery: str = Form(...), 
     manual_type: str = Form(...)
 ):
-    # 1. Extract Text from PDF
+    print(f"--- INGEST: Starting {file.filename} ---")
+    start_time = datetime.datetime.now()
+    
     pdf_bytes = await file.read()
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    text = "".join([page.get_text() for page in doc])
+    
+    # 1. Extract Text Immediately
+    # getting text is fast, so we do it all at once
+    full_text_content = []
+    for page in doc:
+        full_text_content.append(page.get_text())
+    
+    # 2. Collect Image Tasks (Do not await them yet!)
+    image_tasks = []
+    
+    print(" > Extracting images for parallel processing...")
+    
+    for page_index, page in enumerate(doc):
+        image_list = page.get_images(full=True)
+        
+        for img_index, img in enumerate(image_list):
+            xref = img[0]
+            
+            # --- OPTIMIZATION: Filter Small Images ---
+            # img[2] is width, img[3] is height in PyMuPDF's get_images()
+            width, height = img[2], img[3]
+            if width < 300 or height < 300: 
+                # Skip icons, logos, lines, bullets
+                continue
+            
+            # Extract bytes only for valid images
+            base_image = doc.extract_image(xref)
+            image_bytes = base_image["image"]
+            
+            # Create a coroutine task and add to list
+            task = safe_analyze_image(image_bytes)
+            image_tasks.append(task)
 
-    # 2. Enrich text with metadata so the Agent knows the context
-    enriched_content = f"Document Type: {manual_type}. Machinery: {machinery}. Content: {text}"
+    print(f" > Found {len(image_tasks)} valid images. analyzing concurrently...")
 
-    # 3. Run the Self-Healing LangGraph Workflow
+    # 3. Execute all Image Tasks in Parallel
+    # This runs them all at the same time (up to the semaphore limit)
+    image_descriptions = await asyncio.gather(*image_tasks)
+    
+    # 4. Combine Text and Image Descriptions
+    final_text_context = "\n".join(full_text_content) + "\n" + "\n".join(image_descriptions)
+
+    print(f" > Content preparation took: {datetime.datetime.now() - start_time}")
+
+    # 5. Enrich and Run Workflow
+    enriched_content = f"Document Type: {manual_type}. Machinery: {machinery}. Content: {final_text_context}"
+
+    # Use a Document object if you updated your agent.py as discussed previously,
+    # otherwise pass the string 'enriched_content'
+    from langchain_core.documents import Document
+    doc_obj = Document(
+        page_content=enriched_content, # or just use final_text_context depending on your parser
+        metadata={
+            "source": str(manual_type),
+            "machinery": str(machinery),
+            "filename": str(file.filename)
+        }
+    )
+
     result = graph_workflow.invoke({
-        "documents": [enriched_content],
+        "documents": [doc_obj], # Passing object for better metadata handling
         "error_log": None
     })
 
     return {
         "status": "Success",
-        "workflow_path": "Refactored" if result["error_log"] == "refactored" else "Standard Ingest",
-        "machinery_added": machinery
+        "workflow_path": "Refactored" if result.get("error_log") == "refactored" else "Standard Ingest",
+        "machinery_added": machinery,
+        "images_processed": len(image_tasks)
     }
 
 @app.post("/api/agent/chat", response_model=ChatResponse)

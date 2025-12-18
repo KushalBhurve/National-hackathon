@@ -6,6 +6,7 @@ import warnings
 import hashlib  # Added for generating unique Doc IDs
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 from langchain_experimental.text_splitter import SemanticChunker
+from langchain_text_splitters import TokenTextSplitter # <--- NEW IMPORT
 
 from langchain_core.prompts import PromptTemplate
 
@@ -30,9 +31,9 @@ else:
     ssl._create_default_https_context = _create_unverified_https_context
 
 import uuid
-from typing import TypedDict, List, Optional
+from typing import TypedDict, List, Optional, Any
 import httpx
-
+from dotenv import load_dotenv
 # LangChain & AI Imports
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -46,19 +47,20 @@ from langchain_core.output_parsers import StrOutputParser
 
 # *** NEW IMPORT FOR HYBRID RAG ***
 from langchain_neo4j import GraphCypherQAChain
-
+load_dotenv()
 # --- 1. CONFIGURATION ---
 
 # Neo4j Config
 NEO4J_URI = "bolt://localhost:7687"
 NEO4J_USERNAME = "neo4j"
-NEO4J_PASSWORD = "Rag1234##" 
+NEO4J_PASSWORD = "KulVishSuh" 
 
 # ChromaDB Config
 CHROMA_PATH = "./chroma_db_store"
 
 # Corporate Proxy/SSL Fix
 http_client = httpx.Client(verify=False)
+http_async_client = httpx.AsyncClient(verify=False)  # <--- THIS IS THE MISSING PIECE
 api_key = os.getenv("OPENAI_API_KEY")
 
 # --- 2. MODEL INITIALIZATION ---
@@ -69,7 +71,8 @@ llm = ChatOpenAI(
     model="azure/genailab-maas-gpt-4o",
     api_key=api_key,
     temperature=0,
-    http_client=http_client
+    http_client=http_client,
+    http_async_client=http_async_client
 )
 
 # Embedding Model
@@ -92,7 +95,7 @@ vector_store_chroma = Chroma(
 
 # --- 3. WORKFLOW STATE ---
 class GraphState(TypedDict):
-    documents: List[str]      # Raw input strings
+    documents: List[Any]      # Raw input strings
     error_log: Optional[str]
 
 # --- 4. TRIPLE INGESTION NODE (Entities + Neo4j Chunks + Chroma Chunks) ---
@@ -132,35 +135,54 @@ def add_machine_to_graph(machine_data: dict):
         return False
 
     
+# In agent.py
+
 def ingest_node(state: GraphState):
     print("\n--- AGENT: STARTING SEMANTIC INGESTION ---")
     docs_to_process = []
     
-    # 1. PARSE & PREPARE
+    # 1. PARSE & PREPARE (Handles both Strings and Objects)
     for content in state['documents']:
         try:
+            # Defaults
             machinery = "Unknown"
             manual_type = "General"
-            text_part = content
+            text_part = ""
+            doc_metadata = {}
 
-            if "Content: " in content:
-                meta_part, text_part = content.split("Content: ", 1)
-                if "Machinery: " in meta_part:
-                    machinery = meta_part.split("Machinery: ")[1].split(".")[0].strip()
-                if "Document Type: " in meta_part:
-                    manual_type = meta_part.split("Document Type: ")[1].split(".")[0].strip()
+            # CASE A: Document Object
+            if isinstance(content, Document):
+                text_part = content.page_content
+                doc_metadata = content.metadata
+                # Map source -> manual_type
+                if "manual_type" not in doc_metadata and "source" in doc_metadata:
+                    doc_metadata["manual_type"] = doc_metadata["source"]
+                machinery = doc_metadata.get("machinery", "Unknown")
+                manual_type = doc_metadata.get("manual_type", "General")
 
-            if not text_part.strip(): continue
+            # CASE B: String
+            elif isinstance(content, str):
+                text_part = content
+                if "Content: " in content:
+                    meta_part, text_part = content.split("Content: ", 1)
+                    if "Machinery: " in meta_part:
+                        machinery = meta_part.split("Machinery: ")[1].split(".")[0].strip()
+                    if "Document Type: " in meta_part:
+                        manual_type = meta_part.split("Document Type: ")[1].split(".")[0].strip()
+                
+                doc_metadata = {
+                    "machinery": machinery, 
+                    "manual_type": manual_type, 
+                    "source": "user_upload"
+                }
 
-            content_hash = hashlib.md5(text_part.encode('utf-8')).hexdigest()[:8]
-            doc_id = f"{machinery}_{manual_type}_{content_hash}"
-            
-            doc_metadata = {
-                "doc_id": doc_id,
-                "machinery": machinery, 
-                "manual_type": manual_type, 
-                "source": "user_upload"
-            }
+            if not text_part or not text_part.strip(): continue
+
+            # Generate ID
+            if "doc_id" not in doc_metadata:
+                content_hash = hashlib.md5(text_part.encode('utf-8')).hexdigest()[:8]
+                doc_id = f"{machinery}_{manual_type}_{content_hash}"
+                doc_metadata["doc_id"] = doc_id
             
             doc = Document(page_content=text_part, metadata=doc_metadata)
             docs_to_process.append(doc)
@@ -170,28 +192,55 @@ def ingest_node(state: GraphState):
 
     if not docs_to_process: return {"error_log": "no_valid_docs"}
 
-    # 2. EXTRACT ENTITIES (Same as before)
+    # 2. PRE-SPLIT FOR SAFETY
+    # --- FIX IS HERE: Reduced chunk_size from 4000 to 2000 ---
+    # Large chunks cause the LLM to hallucinate incomplete relationships (missing target_id)
+    print("   > Safety Splitting for Context Window...")
+    
+    text_splitter = TokenTextSplitter(
+        chunk_size=2000,   # Reduced from 4000 to prevent JSON Errors
+        chunk_overlap=200
+    )
+    
+    safe_graph_docs = text_splitter.split_documents(docs_to_process)
+    print(f"   > Split {len(docs_to_process)} raw docs into {len(safe_graph_docs)} safe processing chunks.")
+
+    # 3. EXTRACT ENTITIES
     print("   > Extracting Entities...")
     try:
-        transformer = LLMGraphTransformer(llm=llm)
-        graph_documents = transformer.convert_to_graph_documents(docs_to_process)
+        # Optional: Define allowed nodes/rels to further stabilize the LLM
+        # allowed_nodes = ["Machinery", "Part", "Issue", "Action", "Technician"]
+        # allowed_rels = ["PART_OF", "CAUSES", "REQUIRES", "LOCATED_AT"]
+        
+        transformer = LLMGraphTransformer(
+            llm=llm,
+            # allowed_nodes=allowed_nodes, # Uncomment if errors persist
+            # allowed_relationships=allowed_rels
+        )
+        
+        graph_documents = transformer.convert_to_graph_documents(safe_graph_docs)
+        
+        # Post-process: attach metadata to nodes
         for graph_doc in graph_documents:
-            source_meta = graph_doc.source.metadata
-            for node in graph_doc.nodes:
-                node.properties.update(source_meta)
+            if hasattr(graph_doc, 'source') and hasattr(graph_doc.source, 'metadata'):
+                source_meta = graph_doc.source.metadata
+                for node in graph_doc.nodes:
+                    node.properties.update(source_meta)
+                    
         graph.add_graph_documents(graph_documents)
+        print(f"   > Successfully extracted Knowledge Graph from {len(graph_documents)} chunks.")
+        
     except Exception as e:
-        print(f"   > KG Error: {e}")
+        # We catch the error so the Vector Indexing (below) still happens even if Graph fails
+        print(f"   > KG Extraction Skipped due to LLM Validation Error: {e}")
 
-    # 3. SEMANTIC VECTOR INDEXING
+    # 4. SEMANTIC VECTOR INDEXING (Vector Store handles large contexts better, so this is fine)
     print("   > Performing Semantic Splitting...")
-    # breakpoint_threshold_type can be "percentile", "standard_deviation", or "interquartile"
     semantic_splitter = SemanticChunker(
         embeddings, 
         breakpoint_threshold_type="percentile" 
     )
     
-    # This splits docs based on meaning rather than character count
     chunked_docs = semantic_splitter.split_documents(docs_to_process)
     print(f"   > Created {len(chunked_docs)} semantic chunks.")
     
@@ -209,7 +258,7 @@ def ingest_node(state: GraphState):
             vector_store_chroma.add_documents(chunked_docs)
         except Exception as e: print(f"Chroma Vector Error: {e}")
 
-    # 4. LINK DOCUMENT TO MACHINERY (Same as before)
+    # 5. LINK DOCUMENT TO MACHINERY
     print("   > Linking Semantic Chunks to Machinery...")
     for doc in docs_to_process:
         target_machine = doc.metadata.get("machinery")
@@ -226,7 +275,7 @@ def ingest_node(state: GraphState):
                 graph.query(link_query, {"doc_id": doc_id, "machine_name": target_machine})
             except Exception as e: print(f"Linking Error: {e}")
 
-    return {"error_log": None} 
+    return {"error_log": None}
    
 # --- 5. REFACTOR NODE ---
 def refactor_node(state: GraphState):
